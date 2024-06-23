@@ -59,7 +59,7 @@
 	});
 </script>
 
-<div class="grid-rows-1fr-auto grid h-screen w-screen bg-slate-900">
+<div class="grid-rows-1fr-auto grid h-screen w-screen bg-slate-900 overflow-hidden">
 	{#if currentSection === 'midi-ports'}
 		<MidiPorts />
 	{:else if currentSection === 'nodes'}

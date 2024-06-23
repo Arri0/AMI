@@ -3,10 +3,16 @@ use crate::{
     midi::{self, ControlChangeKind},
     path::VirtualPaths,
     render::{
-        self, command::{midi_filter::UpdateMidiFilterKind, ResponseCallback}, midi_filter::{self, MidiFilterUser}, node::{JsonUpdateKind, RequestKind}, preset_map::{Preset, PresetMap}, velocity_map
+        self,
+        command::{midi_filter::UpdateMidiFilterKind, ResponseCallback},
+        midi_filter::{self, MidiFilterUser},
+        node::{JsonUpdateKind, RequestKind},
+        preset_map::{Preset, PresetMap},
+        velocity_map,
     },
 };
 use oxisynth::{SoundFont, Synth};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     fmt::Display,
@@ -35,6 +41,27 @@ impl Display for CouldNotInitSynth {
 
 impl std::error::Error for CouldNotInitSynth {}
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct ReverbParams {
+    active: bool,
+    room_size: f32,
+    damping: f32,
+    width: f32,
+    level: f32,
+}
+
+impl Default for ReverbParams {
+    fn default() -> Self {
+        Self {
+            active: false,
+            room_size: 0.2,
+            damping: 0.0,
+            width: 0.5,
+            level: 0.9,
+        }
+    }
+}
+
 pub struct Node {
     name: String,
     enabled: bool,
@@ -56,6 +83,7 @@ pub struct Node {
     user_presets: Vec<bool>,
     sf_load_handle: Option<SoundFontLoadHandle>,
     sf_load_res_cb: Option<ResponseCallback>,
+    reverb: ReverbParams,
 }
 
 impl Node {
@@ -137,6 +165,43 @@ impl Node {
         } else {
             JsonUpdateKind::Failed
         }
+    }
+
+    fn set_reverb_active(&mut self, active: bool) -> JsonUpdateKind {
+        self.reverb.active = active;
+
+        if let Some(synth) = &mut self.synth {
+            synth.get_reverb_mut().set_active(active);
+        }
+
+        update_fields_or_fail(|updates| {
+            updates.push(("reverb".into(), serialize(self.reverb)?));
+            Ok(())
+        })
+    }
+
+    fn set_reverb_params(
+        &mut self,
+        room_size: f32,
+        damping: f32,
+        width: f32,
+        level: f32,
+    ) -> JsonUpdateKind {
+        self.reverb.room_size = room_size;
+        self.reverb.damping = damping;
+        self.reverb.width = width;
+        self.reverb.level = level;
+
+        if let Some(synth) = &mut self.synth {
+            synth
+                .get_reverb_mut()
+                .set_reverb_params(room_size, damping, width, level);
+        }
+
+        update_fields_or_fail(|updates| {
+            updates.push(("reverb".into(), serialize(self.reverb)?));
+            Ok(())
+        })
     }
 
     fn update_midi_filter(&mut self, kind: UpdateMidiFilterKind) -> JsonUpdateKind {
@@ -260,6 +325,7 @@ impl Node {
                 let mut last_bank = self.last_bank;
                 let mut last_preset = self.last_preset;
                 let sample_rate = self.last_sample_rate;
+                let reverb = self.reverb;
                 self.sf_load_handle = Some(thread::spawn(
                     move || -> Result<SoundFontLoadRes, String> {
                         let font = SoundFont::load(
@@ -290,6 +356,14 @@ impl Node {
                         let mut synth = Synth::default();
                         synth.add_font(font, true);
                         _ = synth.set_polyphony(POLYPHONY);
+                        synth.get_reverb_mut().set_active(reverb.active);
+                        synth.get_reverb_mut().set_reverb_params(
+                            reverb.room_size,
+                            reverb.damping,
+                            reverb.width,
+                            reverb.level,
+                        );
+
                         if let Some(sample_rate) = sample_rate {
                             synth.set_sample_rate(sample_rate as f32);
                         }
@@ -460,6 +534,7 @@ impl Default for Node {
             user_presets: vec![true; super::NUM_USER_PRESETS],
             sf_load_handle: None,
             sf_load_res_cb: None,
+            reverb: Default::default(),
         }
     }
 }
@@ -487,6 +562,7 @@ impl Clone for Node {
             user_presets: self.user_presets.clone(),
             sf_load_handle: None,
             sf_load_res_cb: None,
+            reverb: self.reverb,
         };
         _ = res.load_file_non_blocking();
         res
@@ -549,6 +625,13 @@ impl Render for Node {
                 cb(self.set_ignore_global_transposition(flag))
             }
             RK::SetBankAndPreset(bank, preset) => cb(self.set_preset(bank, preset)),
+            RK::SetSfReverbActive(active) => cb(self.set_reverb_active(active)),
+            RK::SetSfReverbParams {
+                room_size,
+                damping,
+                width,
+                level,
+            } => cb(self.set_reverb_params(room_size, damping, width, level)),
             RK::UpdateMidiFilter(kind) => cb(self.update_midi_filter(kind)),
             RK::SetUserPreset(preset) => cb(self.set_user_preset(preset)),
             RK::SetUserPresetEnabled(p, f) => cb(self.set_user_preset_enabled(p, f)),
@@ -571,6 +654,7 @@ impl Render for Node {
             "bank": serialize(self.last_bank)?,
             "preset": serialize(self.last_preset)?,
             "user_presets": serialize(&self.user_presets)?,
+            "reverb": serialize(self.reverb)?,
         });
         Ok(result)
     }
@@ -591,6 +675,7 @@ impl Render for Node {
         deser_field_opt(source, "bank", |v| self.last_bank = v)?;
         deser_field_opt(source, "preset", |v| self.last_preset = v)?;
         deser_field_opt(source, "user_presets", |v| self.user_presets = v)?;
+        deser_field_opt(source, "reverb", |v| self.reverb = v)?;
         Ok(())
     }
 

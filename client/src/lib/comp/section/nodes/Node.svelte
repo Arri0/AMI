@@ -4,6 +4,7 @@
 	import Header from '../comp/Header.svelte';
 	import Content from '../comp/Content.svelte';
 	import RustySynth from './RustySynth.svelte';
+	import Section from '../comp/Section.svelte';
 
 	export let currentNode;
 
@@ -15,7 +16,7 @@
 	}
 </script>
 
-<div class="text-slate-300">
+<Section>
 	<Header>
 		<div class="flex flex-row">
 			<div class="w-8">
@@ -36,4 +37,4 @@
             {/if}
         </div>
     </Content>
-</div>
+</Section>

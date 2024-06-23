@@ -159,6 +159,26 @@ export class Api extends EventTarget {
         });
     }
 
+    async nodeSetSfReverbActive(id, value=true) {
+        return await this.nodeRequest(id, {
+            'SetSfReverbActive': value
+        });
+    }
+
+    /**
+     * params: {
+     *   room_size: f32,
+     *   damping: f32,
+     *   width: f32,
+     *   level: f32,
+     * }
+     *  */
+    async nodeSetSfReverbParams(id, params=true) {
+        return await this.nodeRequest(id, {
+            'SetSfReverbParams': params
+        });
+    }
+
     async nodeUpdateMidiFilter(id, update) {
         return await this.nodeRequest(id, {
             'UpdateMidiFilter': update

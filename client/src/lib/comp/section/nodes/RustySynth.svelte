@@ -10,6 +10,13 @@
     export let id;
     export let instance;
 
+    let reverbRoomSize;
+    let reverbDamping;
+    let reverbWidth;
+    let reverbLevel;
+
+    $: {instance; updateReverbFields();};
+
     async function changeName(newName) {
         await getApi().nodeSetName(id, newName);
     }
@@ -42,12 +49,32 @@
         await getApi().nodeSetBankAndPreset(id, newBank, newPreset);
     }
 
+    async function changeReverbActive(active) {
+        await getApi().nodeSetSfReverbActive(id, active);
+    }
+
+    async function changeReverbParams() {
+        await getApi().nodeSetSfReverbParams(id, {
+            room_size: reverbRoomSize,
+            damping: reverbDamping,
+            width: reverbWidth,
+            level: reverbLevel,
+        });
+    }
+
     function toDb(value) {
         return 10*Math.log10(value);
     }
 
     function toLin(value) {
         return Math.pow(10, value/10);
+    }
+
+    function updateReverbFields() {
+        reverbRoomSize = instance.reverb.room_size;
+        reverbDamping = instance.reverb.damping;
+        reverbWidth = instance.reverb.width;
+        reverbLevel = instance.reverb.level;
     }
 </script>
 
@@ -65,5 +92,10 @@
     <VelocityMapping name={"Velocity Mapping"} value={instance.velocity_mapping} on:change={(e) => changeVelocityMapping(e.detail)} />
     <FileProp name={"SoundFont File"} value={instance.loaded_file} on:change={(e) => loadFile(e.detail)} />
     <PresetProp name={"Preset"} bank={instance.bank} preset={instance.preset} presetMap={instance.preset_map} on:change={(e) => changeBankAndPreset(e.detail.bank, e.detail.preset)} />
+    <BoolProp name={"Reverb"} value={instance.reverb.active} on:change={(e) => changeReverbActive(e.detail)} />
+    <NumProp name={"Reverb Room Size"} bind:value={reverbRoomSize} smallStep={0.01} largeStep={0.1} defaultValue={0.2} numDecimalPlaces={2} on:change={(e) => changeReverbParams()} />
+    <NumProp name={"Reverb Damping"} bind:value={reverbDamping} smallStep={0.01} largeStep={0.1} defaultValue={0.2} numDecimalPlaces={2} on:change={(e) => changeReverbParams()} />
+    <NumProp name={"Reverb Width"} bind:value={reverbWidth} smallStep={0.01} largeStep={0.1} defaultValue={0.2} numDecimalPlaces={2} on:change={(e) => changeReverbParams()} />
+    <NumProp name={"Reverb Level"} bind:value={reverbLevel} smallStep={0.01} largeStep={0.1} defaultValue={0.2} numDecimalPlaces={2} on:change={(e) => changeReverbParams()} />
     <!-- <textarea>{JSON.stringify(instance, null, 4)}</textarea> -->
 </div>

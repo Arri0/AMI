@@ -22,6 +22,13 @@ pub enum RequestKind {
     SetVelocityMapping(velocity_map::Kind),
     SetIgnoreGlobalTransposition(bool),
     SetBankAndPreset(u8, u8),
+    SetSfReverbActive(bool),
+    SetSfReverbParams {
+        room_size: f32,
+        damping: f32,
+        width: f32,
+        level: f32,
+    },
     AddDrumMachineVoice,
     RemoveDrumMachineVoice(usize),
     ClearDrumMachineVoices,
