@@ -84,7 +84,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let renderer = Arc::new(Mutex::new(renderer));
     let mut audio_ctr = audio::output::Controller::new(renderer);
-    audio_ctr.sample_rate = 44100;
+
+    #[cfg(not(target_os = "windows"))] {
+        audio_ctr.sample_rate = 44100;
+    }
+    #[cfg(target_os = "windows")] {
+        audio_ctr.sample_rate = 48000;
+    }
+
     audio_ctr.buffer_size = 2048;
     audio_ctr
         .connect_to_default_output_device()
