@@ -114,7 +114,7 @@ export class Api extends EventTarget {
     async nodeLoadFile(id, value) {
         return await this.nodeRequest(id, {
             'LoadFile': value
-        }, 5000);
+        }, 30000);
     }
 
     async nodeSetGain(id, value) {

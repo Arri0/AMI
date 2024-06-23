@@ -11,24 +11,23 @@ use crate::{
         velocity_map,
     },
 };
-use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
+use fluidlite::Synth;
 use serde_json::json;
 use std::{
     fmt::Display,
     fs::File,
     mem,
     path::{Path, PathBuf},
-    sync::Arc,
     thread::{self, JoinHandle},
-    time::Duration,
 };
 
 use super::{update_fields_or_fail, Render};
 
-const DEFAULT_NAME: &str = "SoundFontSynth";
+const DEFAULT_NAME: &str = "FluidliteSynth";
+const POLYPHONY: u16 = 64;
 
-type SynthInitRes = (Synthesizer, PresetMap, Option<u8>, Option<u8>);
-type SynthInitResHandle = JoinHandle<Result<SynthInitRes, String>>;
+type SoundFontLoadRes = (std::sync::Mutex<Synth>, PresetMap, Option<u8>, Option<u8>);
+type SoundFontLoadHandle = JoinHandle<Result<SoundFontLoadRes, String>>;
 
 #[derive(Debug)]
 pub struct CouldNotInitSynth;
@@ -45,7 +44,7 @@ pub struct Node {
     name: String,
     enabled: bool,
     midi_filter: midi_filter::MidiFilter,
-    synth: Option<Synthesizer>,
+    synth: Option<std::sync::Mutex<Synth>>,
     last_file: Option<PathBuf>,
     last_virtual_paths: Option<VirtualPaths>,
     last_sample_rate: Option<u32>,
@@ -60,9 +59,8 @@ pub struct Node {
     tmp_lbuf: Vec<f32>,
     tmp_rbuf: Vec<f32>,
     user_presets: Vec<bool>,
-    synth_init_handle: Option<SynthInitResHandle>,
-    synth_init_res_cb: Option<ResponseCallback>,
-    last_timestamp: u128,
+    sf_load_handle: Option<SoundFontLoadHandle>,
+    sf_load_res_cb: Option<ResponseCallback>,
 }
 
 impl Node {
@@ -84,8 +82,8 @@ impl Node {
 
     fn load_file(&mut self, path: &Path, cb: ResponseCallback) {
         self.last_file = Some(path.to_owned());
-        if let Ok(()) = self.init_synth_non_blocking() {
-            self.synth_init_res_cb = Some(cb);
+        if let Ok(()) = self.load_file_non_blocking() {
+            self.sf_load_res_cb = Some(cb);
         } else {
             cb(JsonUpdateKind::Failed);
         }
@@ -127,8 +125,10 @@ impl Node {
         self.last_bank = Some(bank);
         self.last_preset = Some(preset);
         if let Some(synth) = &mut self.synth {
-            synth.process_midi_message(0, 0xB0, 0x00, bank as i32);
-            synth.process_midi_message(0, 0xC0, preset as i32, 0x00);
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.bank_select(0, bank as u32);
+                _ = synth.program_change(0, preset as u32);
+            }
             update_fields_or_fail(|updates| {
                 updates.push(("bank".into(), serialize(bank)?));
                 updates.push(("preset".into(), serialize(preset)?));
@@ -179,74 +179,102 @@ impl Node {
         match message.kind {
             Kind::NoteOn { note, velocity } => self.note_on(note, velocity),
             Kind::NoteOff { note, .. } => self.note_off(note),
-            Kind::PolyphonicAftertouch { .. } => {}
+            Kind::PolyphonicAftertouch { note, pressure } => {
+                self.polyphonic_aftertouch(note, pressure);
+            }
             Kind::ControlChange { kind, value } => self.control_change(kind, value),
-            Kind::ProgramChange { .. } => {}
-            Kind::ChannelAftertouch { .. } => {}
+            Kind::ProgramChange { program } => self.program_change(program),
+            Kind::ChannelAftertouch { pressure } => self.channel_aftertouch(pressure),
             Kind::PitchWheel { value } => self.pitch_wheel(value),
         }
     }
 
     fn note_on(&mut self, note: u8, velocity: u8) {
         let note = self.transpose_note(note);
-        if let Some(s) = self.synth.as_mut() {
-            s.note_on(0, note as i32, velocity as i32)
+        if let Some(synth) = &mut self.synth {
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.note_on(0, note as u32, velocity as u32);
+            }
         }
     }
 
     fn note_off(&mut self, note: u8) {
         let note = self.transpose_note(note);
-        if let Some(s) = self.synth.as_mut() {
-            s.note_off(0, note as i32)
+        if let Some(synth) = &mut self.synth {
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.note_off(0, note as u32);
+            }
+        }
+    }
+
+    fn polyphonic_aftertouch(&mut self, note: u8, pressure: u8) {
+        if let Some(synth) = &mut self.synth {
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.key_pressure(0, note as u32, pressure as u32);
+            }
         }
     }
 
     fn control_change(&mut self, kind: ControlChangeKind, value: u8) {
-        if let Some(s) = self.synth.as_mut() {
-            s.process_midi_message(0, 0xB0, kind.as_number() as i32, value as i32)
+        if let Some(synth) = &mut self.synth {
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.cc(0, kind.as_number() as u32, value as u32);
+            }
+        }
+    }
+
+    fn program_change(&mut self, program: u8) {
+        if let Some(synth) = &mut self.synth {
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.program_change(0, program as u32);
+            }
+        }
+    }
+
+    fn channel_aftertouch(&mut self, pressure: u8) {
+        if let Some(synth) = &mut self.synth {
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.channel_pressure(0, pressure as u32);
+            }
         }
     }
 
     fn pitch_wheel(&mut self, value: u16) {
-        let data1 = (value & 0x7F) | 0x80;
-        let data2 = (value >> 7) & 0x7F;
-        if let Some(s) = self.synth.as_mut() {
-            s.process_midi_message(0, 0xE0, data1 as i32, data2 as i32)
+        if let Some(synth) = &mut self.synth {
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.pitch_bend(0, value as u32);
+            }
         }
     }
 
-    fn init_synth_non_blocking(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let (Some(file), Some(sample_rate), Some(vp)) = (
-            &self.last_file,
-            self.last_sample_rate,
-            &self.last_virtual_paths,
-        ) {
+    fn load_file_non_blocking(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let (Some(file), Some(vp)) = (&self.last_file, &self.last_virtual_paths) {
             if let Some(file) = vp.translate(file) {
                 let mut last_bank = self.last_bank;
                 let mut last_preset = self.last_preset;
-                let block_size = self.tmp_lbuf.len();
-                self.synth_init_handle =
-                    Some(thread::spawn(move || -> Result<SynthInitRes, String> {
-                        let mut sf2 = File::open(file).map_err(|e| e.to_string())?;
-                        let sound_font =
-                            Arc::new(SoundFont::new(&mut sf2).map_err(|e| e.to_string())?);
-                        let preset_map = get_preset_map(&sound_font);
-                        let mut settings = SynthesizerSettings::new(sample_rate as i32);
-                        settings.block_size = block_size;
-                        settings.maximum_polyphony = 32;
-                        settings.enable_reverb_and_chorus = false;
-                        let mut synth =
-                            Synthesizer::new(&sound_font, &settings).map_err(|e| e.to_string())?;
+                let sample_rate = self.last_sample_rate;
+                self.sf_load_handle = Some(thread::spawn(
+                    move || -> Result<SoundFontLoadRes, String> {
+                        let settings = fluidlite::Settings::new().map_err(|e| e.to_string())?;
+                        let synth = Synth::new(settings).map_err(|e| e.to_string())?;
+                        synth
+                            .sfload(file.clone(), true)
+                            .map_err(|e| e.to_string())?;
+                        let _ = synth.set_polyphony(POLYPHONY as u32);
+
+                        let preset_map = get_preset_map(
+                            &rustysynth::SoundFont::new(
+                                &mut File::open(file).map_err(|e| e.to_string())?,
+                            )
+                            .map_err(|e| e.to_string())?,
+                        );
+
                         if let (Some(bank), Some(preset)) = (last_bank, last_preset) {
                             if preset_map.has_preset(bank, preset) {
-                                synth.process_midi_message(0, 0xB0, 0x00, bank as i32);
-                                synth.process_midi_message(0, 0xC0, preset as i32, 0x00);
                             } else if let Some((bank, preset)) = preset_map.first_available_preset()
                             {
                                 last_bank = Some(bank);
                                 last_preset = Some(preset);
-                                synth.process_midi_message(0, 0xB0, 0x00, bank as i32);
-                                synth.process_midi_message(0, 0xC0, preset as i32, 0x00);
                             } else {
                                 last_bank = None;
                                 last_preset = None;
@@ -254,11 +282,13 @@ impl Node {
                         } else if let Some((bank, preset)) = preset_map.first_available_preset() {
                             last_bank = Some(bank);
                             last_preset = Some(preset);
-                            synth.process_midi_message(0, 0xB0, 0x00, bank as i32);
-                            synth.process_midi_message(0, 0xC0, preset as i32, 0x00);
                         }
-                        Ok((synth, preset_map, last_bank, last_preset))
-                    }));
+                        if let Some(sample_rate) = sample_rate {
+                            synth.set_sample_rate(sample_rate as f32);
+                        }
+                        Ok((std::sync::Mutex::new(synth), preset_map, last_bank, last_preset))
+                    },
+                ));
                 Ok(())
             } else {
                 Err(Box::new(CouldNotInitSynth))
@@ -338,42 +368,50 @@ impl Node {
     }
 
     fn update(&mut self) {
-        self.handle_synth_init();
+        self.handle_sf_load();
     }
 
-    fn synth_init_finished(&mut self) -> Option<SynthInitResHandle> {
+    fn sf_load_finished(&mut self) -> Option<SoundFontLoadHandle> {
         let finished = self
-            .synth_init_handle
+            .sf_load_handle
             .as_ref()
             .map(|h| h.is_finished())
             .unwrap_or(false);
 
         if finished {
-            let mut handle2: Option<SynthInitResHandle> = None;
-            mem::swap(&mut self.synth_init_handle, &mut handle2);
+            let mut handle2: Option<SoundFontLoadHandle> = None;
+            mem::swap(&mut self.sf_load_handle, &mut handle2);
             handle2
         } else {
             None
         }
     }
 
-    fn handle_synth_init(&mut self) {
-        if let Some(handle) = self.synth_init_finished() {
+    fn handle_sf_load(&mut self) {
+        if let Some(handle) = self.sf_load_finished() {
             let res = handle.join();
             if let Ok(Ok(res)) = res {
-                self.handle_synth_init_success(res);
+                self.handle_sf_load_success(res);
             } else {
-                self.call_synth_init_cb(JsonUpdateKind::Failed);
+                self.call_sf_load_cb(JsonUpdateKind::Failed);
             }
         }
     }
 
-    fn handle_synth_init_success(&mut self, res: SynthInitRes) {
+    fn handle_sf_load_success(&mut self, res: SoundFontLoadRes) {
         self.synth = Some(res.0);
         self.preset_map = Some(res.1);
         self.last_bank = res.2;
         self.last_preset = res.3;
-        self.call_synth_init_cb(update_fields_or_fail(|updates| {
+        if let (Some(synth), Some(bank), Some(preset)) =
+            (&mut self.synth, self.last_bank, self.last_preset)
+        {
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.bank_select(0, bank as u32);
+                _ = synth.program_change(0, preset as u32);
+            }
+        }
+        self.call_sf_load_cb(update_fields_or_fail(|updates| {
             updates.push(("loaded_file".to_owned(), serialize(self.last_file.clone())?));
             updates.push(("preset_map".to_owned(), serialize(self.preset_map.clone())?));
             updates.push(("bank".to_owned(), serialize(self.last_bank)?));
@@ -382,9 +420,9 @@ impl Node {
         }));
     }
 
-    fn call_synth_init_cb(&mut self, res: JsonUpdateKind) {
+    fn call_sf_load_cb(&mut self, res: JsonUpdateKind) {
         let mut cb: Option<ResponseCallback> = None;
-        mem::swap(&mut self.synth_init_res_cb, &mut cb);
+        mem::swap(&mut self.sf_load_res_cb, &mut cb);
         if let Some(cb) = cb {
             cb(res);
         }
@@ -412,9 +450,8 @@ impl Default for Node {
             tmp_lbuf: vec![],
             tmp_rbuf: vec![],
             user_presets: vec![true; super::NUM_USER_PRESETS],
-            synth_init_handle: None,
-            synth_init_res_cb: None,
-            last_timestamp: 0,
+            sf_load_handle: None,
+            sf_load_res_cb: None,
         }
     }
 }
@@ -440,11 +477,10 @@ impl Clone for Node {
             tmp_lbuf: vec![0.0; self.tmp_lbuf.len()],
             tmp_rbuf: vec![0.0; self.tmp_rbuf.len()],
             user_presets: self.user_presets.clone(),
-            synth_init_handle: None,
-            synth_init_res_cb: None,
-            last_timestamp: 0,
+            sf_load_handle: None,
+            sf_load_res_cb: None,
         };
-        _ = res.init_synth_non_blocking();
+        _ = res.load_file_non_blocking();
         res
     }
 }
@@ -452,30 +488,32 @@ impl Clone for Node {
 impl Render for Node {
     fn render_additive(&mut self, lbuf: &mut [f32], rbuf: &mut [f32]) {
         self.update();
-        self.resize_buffers(usize::min(lbuf.len(), rbuf.len()));
+        let len = usize::min(lbuf.len(), rbuf.len());
+        self.resize_buffers(len);
+        let tmp_lbuf = &mut self.tmp_lbuf[..len];
+        let tmp_rbuf = &mut self.tmp_rbuf[..len];
         if let Some(synth) = &mut self.synth {
-            self.last_timestamp += 1;
-            let tmp_lbuf = &mut self.tmp_lbuf[..lbuf.len()];
-            let tmp_rbuf = &mut self.tmp_rbuf[..rbuf.len()];
-            let start = std::time::Instant::now();
-            synth.render(tmp_lbuf, tmp_rbuf);
-            let duration = start.elapsed();
-            if duration.as_micros() > 2500 {//FIXME: use fluidsynth instead (it's faster, maybe?)
-                synth.note_off_all(true);
+            if let Ok(synth) = synth.get_mut() {
+                let _ = synth.write((tmp_lbuf, tmp_rbuf));
             }
-            // if self.last_timestamp % 100 == 0 {
-            //     tracing::trace!("{:?}", duration);
-            // }
-            render::amplify_buffer(tmp_lbuf, self.gain);
-            render::amplify_buffer(tmp_rbuf, self.gain);
-            render::add_buf_to_buf(lbuf, tmp_lbuf);
-            render::add_buf_to_buf(rbuf, tmp_rbuf);
         }
+        let tmp_lbuf = &mut self.tmp_lbuf[..len];
+        let tmp_rbuf = &mut self.tmp_rbuf[..len];
+        render::amplify_buffer(tmp_lbuf, self.gain);
+        render::amplify_buffer(tmp_rbuf, self.gain);
+        render::add_buf_to_buf(lbuf, tmp_lbuf);
+        render::add_buf_to_buf(rbuf, tmp_rbuf);
     }
 
     fn reset_rendering(&mut self) {
-        if let Some(s) = self.synth.as_mut() {
-            s.reset()
+        if let Some(synth) = &mut self.synth {
+            if let Ok(synth) = synth.get_mut() {
+                _ = synth.cc(
+                    0,
+                    midi::ControlChangeKind::AllSoundsOff.as_number() as u32,
+                    0,
+                );
+            }
         }
     }
 
@@ -485,7 +523,11 @@ impl Render for Node {
 
     fn set_sample_rate(&mut self, sample_rate: u32) {
         self.last_sample_rate = Some(sample_rate);
-        _ = self.init_synth_non_blocking();
+        if let Some(synth) = &mut self.synth {
+            if let Ok(synth) = synth.get_mut() {
+                synth.set_sample_rate(sample_rate as f32);
+            }
+        }
     }
 
     fn receive_midi_message(&mut self, message: &midi::Message) {
@@ -567,7 +609,7 @@ impl MidiFilterUser for Node {
     }
 }
 
-fn get_preset_map(sf: &SoundFont) -> PresetMap {
+fn get_preset_map(sf: &rustysynth::SoundFont) -> PresetMap {
     let mut map = PresetMap::new();
 
     sf.get_presets().iter().for_each(|p| {

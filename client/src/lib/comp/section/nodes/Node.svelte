@@ -3,7 +3,7 @@
 	import Icon from '@iconify/svelte';
 	import Header from '../comp/Header.svelte';
 	import Content from '../comp/Content.svelte';
-	import SoundFontSynth from './SoundFontSynth.svelte';
+	import RustySynth from './RustySynth.svelte';
 
 	export let currentNode;
 
@@ -31,8 +31,8 @@
 	</Header>
 	<Content>
         <div class="mx-auto my-4 flex max-w-[30rem] select-none flex-col gap-8 px-2">
-            {#if kind === 'SoundFontSynth'}
-                <SoundFontSynth id={currentNode} bind:instance />
+            {#if kind === 'RustySynth' || kind === 'OxiSynth' || kind === 'FluidliteSynth'}
+                <RustySynth id={currentNode} bind:instance />
             {/if}
         </div>
     </Content>

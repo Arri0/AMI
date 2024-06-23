@@ -6,7 +6,9 @@ use crate::{deser::{DeserializationResult, SerializationError, SerializationResu
 
 use super::{command::{midi_filter::UpdateMidiFilterKind, ResponseCallback}, velocity_map};
 
-pub mod sound_font_synth;
+pub mod fluidlite_synth;
+pub mod oxi_synth;
+pub mod rusty_synth;
 
 pub const NUM_USER_PRESETS: usize = 16;
 

@@ -9,12 +9,8 @@
 
 	$: nodes = $cache.nodes;
 
-	async function newSFZNode() {
-		console.log(await getApi().addNode('SfzSynth'));
-	}
-
-	async function newSoundFontNode() {
-		console.log(await getApi().addNode('SoundFontSynth'));
+	async function newNode(kind) {
+		console.log(await getApi().addNode(kind));
 	}
 
 	async function removeNode(id) {
@@ -69,9 +65,17 @@
 					class="flex flex-row items-center gap-2 rounded-full bg-slate-800 px-4 py-2"
 					><Icon icon="mingcute:plus-fill" class="inline" /> SFZ</button> -->
 				<button
-					on:click={newSoundFontNode}
+					on:click={() => newNode('RustySynth')}
 					class="flex flex-row items-center gap-2 rounded-full bg-slate-800 px-4 py-2"
-					><Icon icon="mingcute:plus-fill" class="inline" /> SoundFont</button>
+					><Icon icon="mingcute:plus-fill" class="inline" />RustySynth</button>
+				<button
+					on:click={() => newNode('OxiSynth')}
+					class="flex flex-row items-center gap-2 rounded-full bg-slate-800 px-4 py-2"
+					><Icon icon="mingcute:plus-fill" class="inline" />OxiSynth</button>
+				<button
+					on:click={() => newNode('FluidliteSynth')}
+					class="flex flex-row items-center gap-2 rounded-full bg-slate-800 px-4 py-2"
+					><Icon icon="mingcute:plus-fill" class="inline" />FluidliteSynth</button>
 			</div>
 		</div>
 

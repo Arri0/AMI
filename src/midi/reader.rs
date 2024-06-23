@@ -100,7 +100,9 @@ fn connect_midi_in_to_port(
             "",
             move |_, message, _| {
                 if let Some(msg) = Message::decode(message) {
-                    _ = tx.send(msg);
+                    if tx.receiver_count() > 0 {
+                        _ = tx.send(msg);
+                    }
                 }
             },
             (),

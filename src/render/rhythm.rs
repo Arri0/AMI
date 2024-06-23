@@ -69,7 +69,9 @@ impl BeatController {
             current_beat: 0,
             current_div: 0,
         };
-        _ = res.sender.send(Message::SetRhythm(res.config.rhythm));
+        if res.sender.receiver_count() > 0 {
+            _ = res.sender.send(Message::SetRhythm(res.config.rhythm));
+        }
         res
     }
 
@@ -93,7 +95,9 @@ impl BeatController {
             let period = self.period();
             if time - self.last_time >= period {
                 let msg = Message::BeatTick(self.current_beat, self.current_div);
-                _ = self.sender.send(msg);
+                if self.sender.receiver_count() > 0 {
+                    _ = self.sender.send(msg);
+                }
                 self.advance_div();
                 self.last_time += period;
             }
@@ -118,7 +122,9 @@ impl BeatController {
 
     pub fn set_rhythm(&mut self, rhythm: Rhythm) {
         self.config.rhythm = rhythm;
-        _ = self.sender.send(Message::SetRhythm(rhythm));
+        if self.sender.receiver_count() > 0 {
+            _ = self.sender.send(Message::SetRhythm(rhythm));
+        }
     }
 
     pub fn period(&self) -> f32 {

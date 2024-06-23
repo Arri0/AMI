@@ -2,7 +2,7 @@ use clap::Parser;
 use midi::MidiReader;
 use render::{
     command,
-    node::{self, sound_font_synth},
+    node::{self, fluidlite_synth, oxi_synth, rusty_synth},
     Renderer,
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -54,34 +54,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut virtual_paths = crate::path::VirtualPaths::default();
     virtual_paths.insert("samples:".into(), args.samples);
 
-    let clients = Clients::new(256);
-    let midi_reader = Arc::new(Mutex::new(midi::MidiReader::with_slots(
-        midi_tx.clone(),
-        16,
-    )));
-
     info!("| Available MIDI ports:");
     for port in midi::MidiReader::get_available_ports() {
         info!("| - {port}");
     }
 
-    // match midi_reader.connect_input(0, "VMPK Output:out 130:0") {
-    //     Ok(_) => debug!("MIDI port connected: VMPK Output:out 130:0"),
-    //     Err(_) => error!("Failed to connect MIDI port: VMPK Output:out 130:0"),
-    // };
+    let clients = Clients::new(256);
+    let mut midi_reader = midi::MidiReader::with_slots(
+        midi_tx.clone(),
+        16,
+    );
+
+    if midi_reader.connect_input(0, "VMPK Output:out 130:0").is_ok() {
+        tracing::debug!("MIDI port connected: VMPK Output:out 130:0");
+    }
+    if midi_reader.connect_input(0, "Hammer 88 Pro:Hammer 88 Pro USB MIDI 20:0").is_ok() {
+        tracing::debug!("MIDI port connected: Hammer 88 Pro:Hammer 88 Pro USB MIDI 20:0");
+    }
+
+    let midi_reader = Arc::new(Mutex::new(midi_reader));
 
     tokio::spawn(run_midi_logger(midi_rx, clients.clone()));
     tokio::spawn(run_midi_port_watchdog(clients.clone()));
 
     let mut renderer = Renderer::new(midi_tx.subscribe(), req_rx, virtual_paths.clone());
-    renderer.register_node_kind("SoundFontSynth", || {
-        Box::<sound_font_synth::Node>::default()
-    });
+    renderer.register_node_kind("RustySynth", || Box::<rusty_synth::Node>::default());
+    renderer.register_node_kind("OxiSynth", || Box::<oxi_synth::Node>::default());
+    renderer.register_node_kind("FluidliteSynth", || Box::<fluidlite_synth::Node>::default());
 
     let renderer = Arc::new(Mutex::new(renderer));
     let mut audio_ctr = audio::output::Controller::new(renderer);
     audio_ctr.sample_rate = 44100;
-    audio_ctr.buffer_size = 256;
+    audio_ctr.buffer_size = 2048;
     audio_ctr
         .connect_to_default_output_device()
         .expect("Failed to connect to output device");
@@ -92,21 +96,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cache2 = Arc::clone(&cache);
     tokio::spawn(async move {
         let req = command::RequestKind::AddNode {
-            kind: "SoundFontSynth".into(),
+            kind: "OxiSynth".into(),
         };
         if let Some(res) = send_renderer_request(&req_tx2, req).await {
             cache2.lock().await.cache_renderer_response(&res);
         }
 
-        let req = command::RequestKind::NodeRequest {
-            id: 0,
-            kind: node::RequestKind::SetGain(2.0),
-        };
-        if let Some(res) = send_renderer_request(&req_tx2, req).await {
-            cache2.lock().await.cache_renderer_response(&res);
-        }
-
-        let file_path = PathBuf::from("samples:/Masterpiece.sf2");
+        let file_path = PathBuf::from("samples:/MS_Basic.sf2");
         let req = command::RequestKind::NodeRequest {
             id: 0,
             kind: node::RequestKind::LoadFile(file_path),
