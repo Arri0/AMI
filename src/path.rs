@@ -16,6 +16,8 @@ impl VirtualPaths {
     // Translate virtual path to real one, if the resulting path is outside the base,
     // or the virtual path was not found, then return None
     pub fn translate(&self, path: &Path) -> Option<PathBuf> {
+        let path = path.to_str().expect("Path is not a valid UTF-8");
+        let path = &PathBuf::from(&path.replace('/', std::path::MAIN_SEPARATOR_STR));
         for (vp, rp) in self.paths.iter() {
             if let Some(p) = remap_prefix(path, vp, rp) {
                 return Some(p);
@@ -25,6 +27,8 @@ impl VirtualPaths {
     }
 
     pub fn translate_back(&self, path: &Path) -> Option<PathBuf> {
+        let path = path.to_str().expect("Path is not a valid UTF-8");
+        let path = &PathBuf::from(&path.replace(std::path::MAIN_SEPARATOR, "/"));
         for (vp, rp) in self.paths.iter() {
             if let Some(p) = remap_prefix(path, rp, vp) {
                 return Some(p);
