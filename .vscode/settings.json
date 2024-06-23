@@ -1,0 +1,4 @@
+{
+  "svelte.enable-ts-plugin": true,
+  "prettier.printWidth": 1000
+}

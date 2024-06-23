@@ -1,0 +1,15 @@
+@tailwind base;
+
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+@tailwind components;
+
+@tailwind utilities;
+.text-align-inherit {
+    text-align: inherit;
+}

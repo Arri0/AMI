@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Hello from Rust!</title>
+    </head>
+    <body>
+        <h1>Hello from Rust!</h1>
+        <script type="module">
+            import { Api } from './api.js';
+            const api = new Api('127.0.0.1', 3000);
+
+            // Connection opened
+            api.addEventListener('connected', () => {
+                console.log('Connected');
+
+                setInterval(() => {
+                    api.request('Ping');
+                }, 1000);
+            });
+
+            api.addEventListener('disconnected', () => {
+                console.log('Disconnected')
+            })
+        </script>
+    </body>
+</html>
