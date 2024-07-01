@@ -5,6 +5,7 @@
 	import Content from '../comp/Content.svelte';
 	import RustySynth from './RustySynth.svelte';
 	import Section from '../comp/Section.svelte';
+	import SfizzSynth from './SfizzSynth.svelte';
 
 	export let currentNode;
 
@@ -34,6 +35,8 @@
         <div class="mx-auto my-4 flex max-w-[30rem] select-none flex-col gap-8 px-2">
             {#if kind === 'RustySynth' || kind === 'OxiSynth' || kind === 'FluidliteSynth'}
                 <RustySynth id={currentNode} bind:instance />
+			{:else if kind === 'SfizzSynth'}
+				<SfizzSynth id={currentNode} bind:instance />
             {/if}
         </div>
     </Content>

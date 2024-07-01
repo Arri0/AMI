@@ -1,0 +1,64 @@
+{
+  "rhythm": {
+    "num_beats": 4,
+    "num_divs": 3
+  },
+  "tempo_bpm": 90.0,
+  "voices": {
+    "num_slots": 12,
+    "voices": [
+      {
+        "channel": 9,
+        "name": "Hi-Hat (Foot)",
+        "instrument_index": 0,
+        "note": 44,
+        "velocity": 127,
+        "slots": [
+          false, false, false,
+          true, false, false,
+          false, false, false,
+          true, false, false
+        ]
+      },
+      {
+        "channel": 9,
+        "name": "Ride Cymbal",
+        "instrument_index": 0,
+        "note": 59,
+        "velocity": 127,
+        "slots": [
+          true, false, true,
+          true, false, true,
+          true, false, true,
+          true, false, true
+        ]
+      },
+      {
+        "channel": 9,
+        "name": "Snare Drum (Side Stick)",
+        "instrument_index": 0,
+        "note": 37,
+        "velocity": 127,
+        "slots": [
+          false, false, true,
+          false, false, false,
+          false, false, false,
+          true, false, false
+        ]
+      },
+      {
+        "channel": 9,
+        "name": "Bass Drum",
+        "instrument_index": 0,
+        "note": 36,
+        "velocity": 127,
+        "slots": [
+          true, false, false,
+          false, false, false,
+          true, false, false,
+          false, false, false
+        ]
+      }
+    ]
+  }
+}

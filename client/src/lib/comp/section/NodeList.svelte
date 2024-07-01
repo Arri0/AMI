@@ -7,6 +7,13 @@
 
 	export let currentNode;
 
+	const NODE_KINDS = [
+		['RustySynth', 'Rusty Synth'],
+		['OxiSynth', 'Oxi Synth'],
+		['FluidliteSynth', 'Fluidlite Synth'],
+		['SfizzSynth', 'Sfizz Synth'],
+	];
+
 	$: nodes = $cache.nodes;
 
 	async function newNode(kind) {
@@ -59,23 +66,13 @@
 					</div>
 				</div>
 			{/each}
-			<div class="mt-4 flex flex-row gap-2 text-xs">
-				<!-- <button
-					on:click={newSFZNode}
-					class="flex flex-row items-center gap-2 rounded-full bg-slate-800 px-4 py-2"
-					><Icon icon="mingcute:plus-fill" class="inline" /> SFZ</button> -->
-				<button
-					on:click={() => newNode('RustySynth')}
-					class="flex flex-row items-center gap-2 rounded-full bg-slate-800 px-4 py-2"
-					><Icon icon="mingcute:plus-fill" class="inline" />RustySynth</button>
-				<button
-					on:click={() => newNode('OxiSynth')}
-					class="flex flex-row items-center gap-2 rounded-full bg-slate-800 px-4 py-2"
-					><Icon icon="mingcute:plus-fill" class="inline" />OxiSynth</button>
-				<button
-					on:click={() => newNode('FluidliteSynth')}
-					class="flex flex-row items-center gap-2 rounded-full bg-slate-800 px-4 py-2"
-					><Icon icon="mingcute:plus-fill" class="inline" />FluidliteSynth</button>
+			<div class="mt-4 flex flex-row gap-2 text-xs flex-wrap">
+				{#each NODE_KINDS as kind}
+					<button
+						on:click={() => newNode(kind[0])}
+						class="flex flex-row items-center gap-2 rounded-full bg-slate-800 px-4 py-2"
+						><Icon icon="mingcute:plus-fill" class="inline" />{kind[1]}</button>
+				{/each}
 			</div>
 		</div>
 

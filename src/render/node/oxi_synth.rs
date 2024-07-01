@@ -1,20 +1,19 @@
+use super::Render;
 use crate::{
-    deser::{deser_field_opt, serialize, DeserializationResult, SerializationResult},
-    midi::{self, ControlChangeKind},
-    path::VirtualPaths,
-    render::{
+    deser::{deser_field_opt, serialize, DeserializationResult, SerializationResult}, json::{update_fields_or_fail, JsonUpdateKind, JsonUpdater}, midi::{self, ControlChangeKind}, path::VirtualPaths, render::{
         self,
         command::{midi_filter::UpdateMidiFilterKind, ResponseCallback},
         midi_filter::{self, MidiFilterUser},
-        node::{JsonUpdateKind, RequestKind},
+        node::RequestKind,
         preset_map::{Preset, PresetMap},
         velocity_map,
-    },
+    }
 };
 use oxisynth::{SoundFont, Synth};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
+    collections::HashMap,
     fmt::Display,
     fs::File,
     mem,
@@ -22,12 +21,10 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use super::{update_fields_or_fail, Render};
-
-const DEFAULT_NAME: &str = "OxiSynth";
+const DEFAULT_NAME: &str = "Oxi Synth";
 const POLYPHONY: u16 = 64;
 
-type SoundFontLoadRes = (Synth, PresetMap, Option<u8>, Option<u8>);
+type SoundFontLoadRes = (Synth, PresetMap, Option<u16>, Option<u8>);
 type SoundFontLoadHandle = JoinHandle<Result<SoundFontLoadRes, String>>;
 
 #[derive(Debug)]
@@ -70,8 +67,10 @@ pub struct Node {
     last_file: Option<PathBuf>,
     last_virtual_paths: Option<VirtualPaths>,
     last_sample_rate: Option<u32>,
-    last_bank: Option<u8>,
+    last_bank: Option<u16>,
     last_preset: Option<u8>,
+    last_cc: HashMap<u8, u8>,
+    last_pitch_wheel: u16,
     preset_map: Option<PresetMap>,
     gain: f32,
     transposition: i8,
@@ -84,6 +83,7 @@ pub struct Node {
     sf_load_handle: Option<SoundFontLoadHandle>,
     sf_load_res_cb: Option<ResponseCallback>,
     reverb: ReverbParams,
+    json_updater: Option<JsonUpdater>,
 }
 
 impl Node {
@@ -144,7 +144,7 @@ impl Node {
         })
     }
 
-    fn set_preset(&mut self, bank: u8, preset: u8) -> JsonUpdateKind {
+    fn set_preset(&mut self, bank: u16, preset: u8) -> JsonUpdateKind {
         self.last_bank = Some(bank);
         self.last_preset = Some(preset);
         if let Some(synth) = &mut self.synth {
@@ -240,8 +240,12 @@ impl Node {
     }
 
     fn process_midi_message(&mut self, message: &midi::Message) {
+        self.process_midi_message_kind(&message.kind);
+    }
+
+    fn process_midi_message_kind(&mut self, kind: &midi::MessageKind) {
         use midi::MessageKind as Kind;
-        match message.kind {
+        match *kind {
             Kind::NoteOn { note, velocity } => self.note_on(note, velocity),
             Kind::NoteOff { note, .. } => self.note_off(note),
             Kind::PolyphonicAftertouch { note, pressure } => {
@@ -286,6 +290,7 @@ impl Node {
     }
 
     fn control_change(&mut self, kind: ControlChangeKind, value: u8) {
+        self.last_cc.insert(kind.as_number(), value);
         if let Some(synth) = &mut self.synth {
             _ = synth.send_event(oxisynth::MidiEvent::ControlChange {
                 channel: 0,
@@ -314,6 +319,7 @@ impl Node {
     }
 
     fn pitch_wheel(&mut self, value: u16) {
+        self.last_pitch_wheel = value;
         if let Some(synth) = &mut self.synth {
             _ = synth.send_event(oxisynth::MidiEvent::PitchBend { channel: 0, value });
         }
@@ -326,6 +332,8 @@ impl Node {
                 let mut last_preset = self.last_preset;
                 let sample_rate = self.last_sample_rate;
                 let reverb = self.reverb;
+                let last_cc = self.last_cc.clone();
+                let last_pitch_wheel = self.last_pitch_wheel;
                 self.sf_load_handle = Some(thread::spawn(
                     move || -> Result<SoundFontLoadRes, String> {
                         let font = SoundFont::load(
@@ -366,6 +374,17 @@ impl Node {
 
                         if let Some(sample_rate) = sample_rate {
                             synth.set_sample_rate(sample_rate as f32);
+                        }
+                        _ = synth.send_event(oxisynth::MidiEvent::PitchBend {
+                            channel: 0,
+                            value: last_pitch_wheel,
+                        });
+                        for (ctrl, value) in last_cc {
+                            _ = synth.send_event(oxisynth::MidiEvent::ControlChange {
+                                channel: 0,
+                                ctrl,
+                                value,
+                            })
                         }
                         Ok((synth, preset_map, last_bank, last_preset))
                     },
@@ -509,6 +528,12 @@ impl Node {
             cb(res);
         }
     }
+
+    fn broadcast_update(&self, kind: JsonUpdateKind) {
+        if let Some(updater) = &self.json_updater {
+            updater.broadcast(kind);
+        }
+    }
 }
 
 impl Default for Node {
@@ -523,6 +548,8 @@ impl Default for Node {
             last_sample_rate: None,
             last_bank: None,
             last_preset: None,
+            last_cc: HashMap::new(),
+            last_pitch_wheel: 8192, // TODO: make sure this is the correct default value
             preset_map: None,
             gain: 1.0,
             transposition: 0,
@@ -535,6 +562,7 @@ impl Default for Node {
             sf_load_handle: None,
             sf_load_res_cb: None,
             reverb: Default::default(),
+            json_updater: None,
         }
     }
 }
@@ -551,6 +579,8 @@ impl Clone for Node {
             last_sample_rate: self.last_sample_rate,
             last_bank: self.last_bank,
             last_preset: self.last_preset,
+            last_cc: self.last_cc.clone(),
+            last_pitch_wheel: self.last_pitch_wheel,
             preset_map: None,
             gain: self.gain,
             transposition: self.transposition,
@@ -563,6 +593,7 @@ impl Clone for Node {
             sf_load_handle: None,
             sf_load_res_cb: None,
             reverb: self.reverb,
+            json_updater: None,
         };
         _ = res.load_file_non_blocking();
         res
@@ -612,6 +643,10 @@ impl Render for Node {
         self.global_transposition = transposition;
     }
 
+    fn set_json_updater(&mut self, updater: JsonUpdater) {
+        self.json_updater = Some(updater);
+    }
+
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback) {
         type RK = RequestKind;
         match kind {
@@ -625,6 +660,15 @@ impl Render for Node {
                 cb(self.set_ignore_global_transposition(flag))
             }
             RK::SetBankAndPreset(bank, preset) => cb(self.set_preset(bank, preset)),
+            RK::MidiMessage(kind) => {
+                self.process_midi_message_kind(&kind);
+                cb(update_fields_or_fail(|updates| {
+                    //TODO: support indices and fields for optimization
+                    updates.push(("cc".into(), serialize(self.last_cc.clone())?));
+                    updates.push(("pitch_wheel".into(), serialize(self.last_pitch_wheel)?));
+                    Ok(())
+                }))
+            }
             RK::SetSfReverbActive(active) => cb(self.set_reverb_active(active)),
             RK::SetSfReverbParams {
                 room_size,
@@ -653,6 +697,8 @@ impl Render for Node {
             "preset_map": serialize(&self.preset_map)?,
             "bank": serialize(self.last_bank)?,
             "preset": serialize(self.last_preset)?,
+            "cc": serialize(self.last_cc.clone())?,
+            "pitch_wheel": serialize(self.last_pitch_wheel)?,
             "user_presets": serialize(&self.user_presets)?,
             "reverb": serialize(self.reverb)?,
         });
@@ -674,6 +720,8 @@ impl Render for Node {
         deser_field_opt(source, "loaded_file", |v| self.last_file = v)?;
         deser_field_opt(source, "bank", |v| self.last_bank = v)?;
         deser_field_opt(source, "preset", |v| self.last_preset = v)?;
+        deser_field_opt(source, "cc", |v| self.last_cc = v)?;
+        deser_field_opt(source, "pitch_wheel", |v| self.last_pitch_wheel = v)?;
         deser_field_opt(source, "user_presets", |v| self.user_presets = v)?;
         deser_field_opt(source, "reverb", |v| self.reverb = v)?;
         Ok(())
@@ -699,7 +747,7 @@ fn get_preset_map(sf: &rustysynth::SoundFont) -> PresetMap {
             preset.add_note_range(r.get_key_range_start() as u8, r.get_key_range_end() as u8);
         }
         map.add_preset(
-            p.get_bank_number() as u8,
+            p.get_bank_number() as u16,
             p.get_patch_number() as u8,
             preset,
         );

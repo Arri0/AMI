@@ -1,6 +1,5 @@
 use crate::{
-    midi::{self, MidiReader},
-    render::{command, node::JsonUpdateKind},
+    control::drum_machine, json::JsonUpdateKind, midi::{self, MidiReader}, render::command
 };
 use axum::{
     extract::{
@@ -254,6 +253,7 @@ pub enum ServerMessageKind {
     Cache(serde_json::Value),
     RendererResponse(command::ResponseKind),
     DirInfo(Option<Vec<(bool, PathBuf)>>), // (is_dir, path)
+    DrumMachineUpdate(JsonUpdateKind),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -271,6 +271,7 @@ pub enum ClientMessageKind {
     DisconnectMidiInput(usize),
     RendererRequest(command::RequestKind),
     ReadDir(PathBuf),
+    DrumMachineRequest(drum_machine::RequestKind),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -285,10 +286,11 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn new() -> Self {
+    pub fn new(drum_machine_json: serde_json::Value) -> Self {
         Self {
             cache: json!({
-                "nodes": []
+                "nodes": [],
+                "drum_machine": drum_machine_json,
             }),
         }
     }
@@ -308,6 +310,20 @@ impl Cache {
             command::ResponseKind::RemoveNode { id } => self.remove_node(*id),
             command::ResponseKind::CloneNode { id } => self.clone_node(*id),
             command::ResponseKind::MoveNode { id, new_id } => todo!(),
+        }
+    }
+
+    pub fn chache_drum_machine_update(&mut self, kind: &JsonUpdateKind) {
+        match kind {
+            JsonUpdateKind::InvalidId => {}
+            JsonUpdateKind::Denied => {}
+            JsonUpdateKind::Failed => {}
+            JsonUpdateKind::Ok => {}
+            JsonUpdateKind::UpdateFields(updates) => {
+                for update in updates {
+                    self.cache["drum_machine"][&update.0] = update.1.clone();
+                }
+            }
         }
     }
 
@@ -339,6 +355,7 @@ impl Cache {
             JsonUpdateKind::InvalidId => {}
             JsonUpdateKind::Denied => {}
             JsonUpdateKind::Failed => {}
+            JsonUpdateKind::Ok => {}
             JsonUpdateKind::UpdateFields(updates) => {
                 for update in updates {
                     self.cache["nodes"][node_id]["instance"][&update.0] = update.1.clone();

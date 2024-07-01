@@ -1,0 +1,51 @@
+{
+  "rhythm": {
+    "num_beats": 4,
+    "num_divs": 4
+  },
+  "tempo_bpm": 90.0,
+  "voices": {
+    "num_slots": 16,
+    "voices": [
+      {
+        "channel": 9,
+        "name": "Hi-Hat (Closed)",
+        "instrument_index": 0,
+        "note": 42,
+        "velocity": 127,
+        "slots": [
+          true, false, true, false,
+          true, false, true, false,
+          true, false, true, false,
+          true, false, true, false
+        ]
+      },
+      {
+        "channel": 9,
+        "name": "Snare Drum",
+        "instrument_index": 0,
+        "note": 38,
+        "velocity": 127,
+        "slots": [
+          false, false, false, false,
+          true, false, false, false,
+          false, false, false, false,
+          true, false, false, false
+        ]
+      },
+      {
+        "channel": 9,
+        "name": "Bass Drum",
+        "instrument_index": 0,
+        "note": 36,
+        "velocity": 127,
+        "slots": [
+          true, false, false, false,
+          false, false, true, false,
+          false, false, true, false,
+          false, false, false, false
+        ]
+      }
+    ]
+  }
+}

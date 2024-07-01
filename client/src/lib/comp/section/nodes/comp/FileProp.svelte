@@ -6,6 +6,7 @@
 
 	export let name;
 	export let value = '';
+    export let allowedExtensions = undefined;
 
 	let dispatch = createEventDispatcher();
 
@@ -14,7 +15,7 @@
             title: 'Select SounFont File',
             buttonText: 'Select',
             path: 'samples:',
-            allowedExtensions: ['sf2', 'sf3'],
+            allowedExtensions,
         });
         if(file !== null) {
             value = file;

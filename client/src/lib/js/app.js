@@ -9,6 +9,17 @@ export const cache = writable({
     nodes: []
 });
 
+window.getApi = function() {
+    return api;
+}
+
+window.logCache = function() {
+    return cache.update((cache) => {
+        console.log(cache);
+        return cache;
+    })
+}
+
 export let openFileBrowser = () => {};
 
 export function registerFileBrowser(openFn) {
@@ -43,8 +54,8 @@ export function appInit() {
         console.log('cache', ev.detail);
     });
 
-    api.addEventListener('cache-update', (ev) => {
-        console.log('cache-update', ev.detail);
+    api.addEventListener('renderer-update', (ev) => {
+        console.log('renderer-update', ev.detail);
         const update = ev.detail;
         if('NodeResponse' in update) {
             const nodeId = update.NodeResponse.id;
@@ -56,6 +67,16 @@ export function appInit() {
             removeNode(update.RemoveNode.id);
         } else if('CloneNode' in update) {
             cloneNode(update.CloneNode.id);
+        }
+    });
+
+    api.addEventListener('drum-machine-update', (ev) => {
+        console.log('drum-machine-update', ev.detail);
+        const kind = ev.detail;
+        if(typeof kind === 'object' && !Array.isArray(kind) && kind !== null) {
+            if('UpdateFields' in kind) {
+                updateDrumMachineFields(kind.UpdateFields);
+            }
         }
     });
 }
@@ -102,6 +123,16 @@ function updateNodeFields(id, fields) {
         const instance = value.nodes[id].instance;
         for(const field of fields) {
             instance[field[0]] = field[1];
+        }
+        return value;
+    })
+}
+
+function updateDrumMachineFields(fields) {
+    cache.update((value) => {
+        const drum_machine = value.drum_machine;
+        for(const field of fields) {
+            drum_machine[field[0]] = field[1];
         }
         return value;
     })

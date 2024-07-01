@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct PresetMap {
-    banks: BTreeMap<u8, BTreeMap<u8, Preset>>,
+    banks: BTreeMap<u16, BTreeMap<u8, Preset>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -20,7 +20,7 @@ impl PresetMap {
         }
     }
 
-    pub fn add_preset(&mut self, bank: u8, preset_id: u8, preset: Preset) {
+    pub fn add_preset(&mut self, bank: u16, preset_id: u8, preset: Preset) {
         match self.banks.get_mut(&bank) {
             Some(presets) => {
                 presets.insert(preset_id, preset);
@@ -33,7 +33,7 @@ impl PresetMap {
         }
     }
 
-    pub fn has_preset(&self, bank: u8, preset_id: u8) -> bool {
+    pub fn has_preset(&self, bank: u16, preset_id: u8) -> bool {
         if !self.banks.contains_key(&bank) {
             false
         } else {
@@ -41,7 +41,7 @@ impl PresetMap {
         }
     }
 
-    pub fn first_available_preset(&self) -> Option<(u8,u8)> {
+    pub fn first_available_preset(&self) -> Option<(u16,u8)> {
         let bank0 = self.banks.first_key_value()?;
         return bank0.1.keys().next().map(|preset_id| (*bank0.0, *preset_id))
     }

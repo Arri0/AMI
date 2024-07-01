@@ -46,7 +46,7 @@
 			on:change={() => emitChange()}
 			class="outline-none text-align-inherit inline-block align-middle w-full rounded-l-full {unit === null ? 'rounded-r-full' : ''} border border-solid border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-300 read-only:outline-none" />
 		{#if unit !== null}
-			<span class="font-mono text-left inline-block align-middle rounded-r-full border border-solid border-slate-700 bg-slate-800 px-2 py-1 text-slate-400 text-sm" style:width={unitWidth}>{unit}</span>
+			<span class="font-mono text-left inline-block align-middle rounded-r-full border border-solid border-slate-700 bg-slate-800 pl-2 pr-3 py-1 text-slate-400 text-sm" style:width={unitWidth}>{unit}</span>
 		{/if}
 	</div>
 	<div class="flex flex-row text-2xl w-full place-content-between">

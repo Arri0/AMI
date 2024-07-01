@@ -1,15 +1,13 @@
-use std::collections::HashMap;
-
-use crate::{midi, path::VirtualPaths};
+use crate::{control, midi, path::VirtualPaths};
 use command::{RequestKind, Responder, ResponseKind};
 use node::RenderPtr;
+use std::collections::HashMap;
 use tracing::error;
 
 pub mod command;
 pub mod midi_filter;
 pub mod node;
 pub mod preset_map;
-pub mod rhythm;
 pub mod velocity_map;
 
 pub const MAX_BUFFER_SIZE: usize = 192000;
@@ -21,6 +19,7 @@ pub struct Renderer {
     nodes: Vec<(String, RenderPtr)>,
     midi_rx: midi::Receiver,
     req_rx: command::RequestListener,
+    dm_ctr_rx: control::CtrReceiver,
     sample_rate: Option<u32>,
     global_transposition: i8,
     virtual_paths: VirtualPaths,
@@ -30,6 +29,7 @@ impl Renderer {
     pub fn new(
         midi_rx: midi::Receiver,
         req_rx: command::RequestListener,
+        dm_ctr_rx: control::CtrReceiver,
         virtual_paths: VirtualPaths,
     ) -> Self {
         Self {
@@ -37,6 +37,7 @@ impl Renderer {
             nodes: Default::default(),
             midi_rx,
             req_rx,
+            dm_ctr_rx,
             sample_rate: None,
             global_transposition: 0,
             virtual_paths,
@@ -68,14 +69,15 @@ impl Renderer {
     pub fn render(&mut self, lbuf: &mut [f32], rbuf: &mut [f32]) {
         self.receive_requests();
         self.receive_midi_messages();
+        self.receive_drum_machine_messages();
         self.render_audio(lbuf, rbuf);
     }
 
     pub fn add_node(&mut self, kind: String, mut node: RenderPtr) {
         if let Some(sample_rate) = self.sample_rate {
             node.set_sample_rate(sample_rate);
-            node.set_virtual_paths(self.virtual_paths.clone());
         }
+        node.set_virtual_paths(self.virtual_paths.clone());
         node.set_global_transposition(self.global_transposition);
         self.nodes.push((kind, node));
     }
@@ -94,6 +96,34 @@ impl Renderer {
         }
     }
 
+    fn receive_drum_machine_messages(&mut self) {
+        while let Ok(msg) = self.dm_ctr_rx.try_recv() {
+            let node_id = msg.instrument_id;
+            if node_id < self.nodes.len() {
+                let node = &mut self.nodes[node_id].1;
+                if msg.velocity > 0 {
+                    let msg = midi::Message {
+                        kind: midi::MessageKind::NoteOn {
+                            note: msg.note,
+                            velocity: msg.velocity,
+                        },
+                        channel: msg.channel,
+                    };
+                    node.receive_midi_message(&msg);
+                } else {
+                    let msg = midi::Message {
+                        kind: midi::MessageKind::NoteOff {
+                            note: msg.note,
+                            velocity: 0,
+                        },
+                        channel: msg.channel,
+                    };
+                    node.receive_midi_message(&msg);
+                }
+            }
+        }
+    }
+
     fn render_audio(&mut self, lbuf: &mut [f32], rbuf: &mut [f32]) {
         lbuf.fill(0.0);
         rbuf.fill(0.0);
@@ -108,7 +138,8 @@ impl Renderer {
                 if id >= self.nodes.len() {
                     respond(responder, ResponseKind::InvalidId);
                 } else {
-                    let cb = move |kind| respond(responder, ResponseKind::NodeResponse { id, kind });
+                    let cb =
+                        move |kind| respond(responder, ResponseKind::NodeResponse { id, kind });
                     self.nodes[id].1.process_request(kind, Box::new(cb));
                 }
             }
@@ -146,7 +177,7 @@ impl Renderer {
                     respond(responder, ResponseKind::InvalidId)
                 } else {
                     let node = &self.nodes[id];
-                    self.nodes.push((node.0.clone(), node.1.clone_node()));
+                    self.add_node(node.0.clone(), node.1.clone_node());
                     respond(responder, ResponseKind::CloneNode { id })
                 }
             }

@@ -260,6 +260,87 @@ export class Api extends EventTarget {
         return [dirs.sort(), files.sort()]
     }
 
+    async drumMachineRequest(kind, timeout) {
+        return await this.request({
+            'DrumMachineRequest': kind
+        }, timeout);
+    }
+
+    async drumMachineSetEnabled(value=true) {
+        return await this.drumMachineRequest({
+            'SetEnabled': value
+        });
+    }
+
+    async drumMachineAddVoice() {
+        return await this.drumMachineRequest('AddVoice');
+    }
+
+    async drumMachineRemoveVoice(voiceId) {
+        return await this.drumMachineRequest({
+            'RemoveVoice': voiceId
+        });
+    }
+
+    async drumMachineClearVoices() {
+        return await this.drumMachineRequest('ClearVoices');
+    }
+
+    async drumMachineSetVoiceName(voiceId, name) {
+        return await this.drumMachineRequest({
+            'SetVoiceName': [voiceId, name]
+        });
+    }
+
+    async drumMachineSetVoiceInstrument(voiceId, instrumentId) {
+        return await this.drumMachineRequest({
+            'SetVoiceInstrument': [voiceId, instrumentId]
+        });
+    }
+
+    async drumMachineSetVoiceNote(voiceId, note) {
+        return await this.drumMachineRequest({
+            'SetVoiceNote': [voiceId, note]
+        });
+    }
+
+    async drumMachineSetSlot(voiceId, slotId, velocity) {
+        return await this.drumMachineRequest({
+            'SetSlot': [voiceId, slotId, velocity]
+        });
+    }
+
+    async drumMachineSetRhythm(numBeats, numDivs) {
+        return await this.drumMachineRequest({
+            'SetRhythm': {
+                num_beats: numBeats,
+                num_divs: numDivs,
+            }
+        });
+    }
+
+    async drumMachineSetTempoBpm(tempoBpm) {
+        return await this.drumMachineRequest({
+            'SetTempoBpm': tempoBpm
+        });
+    }
+
+    async drumMachineReset() {
+        return await this.drumMachineRequest('Reset');
+    }
+
+    async drumMachineLoadPreset(path) {
+        return await this.drumMachineRequest({
+            'LoadPreset': path
+        });
+    }
+
+    async drumMachineSavePreset(path) {
+        return await this.drumMachineRequest({
+            'SavePreset': path
+        });
+    }
+
     _addRequest(id, resolve, reject) {
         this.requestCallbacks[id] = {
             resolve,
@@ -308,8 +389,12 @@ export class Api extends EventTarget {
                 detail: msg.Cache
             }));
         } else if ('RendererResponse' in msg) {
-            this.dispatchEvent(new CustomEvent('cache-update', {
+            this.dispatchEvent(new CustomEvent('renderer-update', {
                 detail: msg.RendererResponse
+            }));
+        } else if ('DrumMachineUpdate' in msg) {
+            this.dispatchEvent(new CustomEvent('drum-machine-update', {
+                detail: msg.DrumMachineUpdate
             }));
         }
     }

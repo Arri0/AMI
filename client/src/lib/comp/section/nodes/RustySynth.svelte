@@ -90,7 +90,7 @@
     <NumProp name={"Gain"} value={toDb(instance.gain)} smallStep={1} largeStep={5} defaultValue={0} numDecimalPlaces={1} unit={"dB"} on:change={(e) => changeGain(toLin(e.detail))} />
     <NumProp name={"Transposition"} value={instance.transposition} smallStep={1} largeStep={12} defaultValue={0} min={-128} max={127} numDecimalPlaces={0} unit={"semit."} on:change={(e) => changeTransposition(e.detail)} />
     <VelocityMapping name={"Velocity Mapping"} value={instance.velocity_mapping} on:change={(e) => changeVelocityMapping(e.detail)} />
-    <FileProp name={"SoundFont File"} value={instance.loaded_file} on:change={(e) => loadFile(e.detail)} />
+    <FileProp name={"SoundFont File"} value={instance.loaded_file} on:change={(e) => loadFile(e.detail)} allowedExtensions={['sf2', 'sf3']} />
     <PresetProp name={"Preset"} bank={instance.bank} preset={instance.preset} presetMap={instance.preset_map} on:change={(e) => changeBankAndPreset(e.detail.bank, e.detail.preset)} />
     <BoolProp name={"Reverb"} value={instance.reverb.active} on:change={(e) => changeReverbActive(e.detail)} />
     <NumProp name={"Reverb Room Size"} bind:value={reverbRoomSize} smallStep={0.01} largeStep={0.1} defaultValue={0.2} numDecimalPlaces={2} on:change={(e) => changeReverbParams()} />

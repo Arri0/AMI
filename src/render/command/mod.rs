@@ -1,9 +1,8 @@
+use crate::json::JsonUpdateKind;
 use crate::render::node;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-
-use super::node::JsonUpdateKind;
 
 pub mod midi_filter;
 
@@ -38,7 +37,7 @@ pub enum ResponseKind {
     Failed,
     NodeResponse {
         id: usize,
-        kind: node::JsonUpdateKind,
+        kind: JsonUpdateKind,
     },
     AddNode {
         id: usize,

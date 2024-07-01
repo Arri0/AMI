@@ -1,12 +1,14 @@
+use super::Render;
 use crate::{
     deser::{deser_field_opt, serialize, DeserializationResult, SerializationResult},
+    json::{update_fields_or_fail, JsonUpdateKind, JsonUpdater},
     midi::{self, ControlChangeKind},
     path::VirtualPaths,
     render::{
         self,
         command::{midi_filter::UpdateMidiFilterKind, ResponseCallback},
         midi_filter::{self, MidiFilterUser},
-        node::{JsonUpdateKind, RequestKind},
+        node::RequestKind,
         preset_map::{Preset, PresetMap},
         velocity_map,
     },
@@ -21,12 +23,10 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use super::{update_fields_or_fail, Render};
-
-const DEFAULT_NAME: &str = "FluidliteSynth";
+const DEFAULT_NAME: &str = "Fluidlite Synth";
 const POLYPHONY: u16 = 64;
 
-type SoundFontLoadRes = (std::sync::Mutex<Synth>, PresetMap, Option<u8>, Option<u8>);
+type SoundFontLoadRes = (std::sync::Mutex<Synth>, PresetMap, Option<u16>, Option<u8>);
 type SoundFontLoadHandle = JoinHandle<Result<SoundFontLoadRes, String>>;
 
 #[derive(Debug)]
@@ -48,7 +48,7 @@ pub struct Node {
     last_file: Option<PathBuf>,
     last_virtual_paths: Option<VirtualPaths>,
     last_sample_rate: Option<u32>,
-    last_bank: Option<u8>,
+    last_bank: Option<u16>,
     last_preset: Option<u8>,
     preset_map: Option<PresetMap>,
     gain: f32,
@@ -121,7 +121,7 @@ impl Node {
         })
     }
 
-    fn set_preset(&mut self, bank: u8, preset: u8) -> JsonUpdateKind {
+    fn set_preset(&mut self, bank: u16, preset: u8) -> JsonUpdateKind {
         self.last_bank = Some(bank);
         self.last_preset = Some(preset);
         if let Some(synth) = &mut self.synth {
@@ -286,7 +286,12 @@ impl Node {
                         if let Some(sample_rate) = sample_rate {
                             synth.set_sample_rate(sample_rate as f32);
                         }
-                        Ok((std::sync::Mutex::new(synth), preset_map, last_bank, last_preset))
+                        Ok((
+                            std::sync::Mutex::new(synth),
+                            preset_map,
+                            last_bank,
+                            last_preset,
+                        ))
                     },
                 ));
                 Ok(())
@@ -540,6 +545,10 @@ impl Render for Node {
         self.global_transposition = transposition;
     }
 
+    fn set_json_updater(&mut self, updater: JsonUpdater) {
+        // TODO: implement this fn
+    }
+
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback) {
         type RK = RequestKind;
         match kind {
@@ -618,7 +627,7 @@ fn get_preset_map(sf: &rustysynth::SoundFont) -> PresetMap {
             preset.add_note_range(r.get_key_range_start() as u8, r.get_key_range_end() as u8);
         }
         map.add_preset(
-            p.get_bank_number() as u8,
+            p.get_bank_number() as u16,
             p.get_patch_number() as u8,
             preset,
         );

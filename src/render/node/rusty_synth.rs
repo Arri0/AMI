@@ -1,15 +1,13 @@
+use super::Render;
 use crate::{
-    deser::{deser_field_opt, serialize, DeserializationResult, SerializationResult},
-    midi::{self, ControlChangeKind},
-    path::VirtualPaths,
-    render::{
+    deser::{deser_field_opt, serialize, DeserializationResult, SerializationResult}, json::{update_fields_or_fail, JsonUpdateKind, JsonUpdater}, midi::{self, ControlChangeKind}, path::VirtualPaths, render::{
         self,
         command::{midi_filter::UpdateMidiFilterKind, ResponseCallback},
         midi_filter::{self, MidiFilterUser},
-        node::{JsonUpdateKind, RequestKind},
+        node::RequestKind,
         preset_map::{Preset, PresetMap},
         velocity_map,
-    },
+    }
 };
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 use serde_json::json;
@@ -22,11 +20,9 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use super::{update_fields_or_fail, Render};
+const DEFAULT_NAME: &str = "Rusty Synth";
 
-const DEFAULT_NAME: &str = "RustySynth";
-
-type SynthInitRes = (Synthesizer, PresetMap, Option<u8>, Option<u8>);
+type SynthInitRes = (Synthesizer, PresetMap, Option<u16>, Option<u8>);
 type SynthInitResHandle = JoinHandle<Result<SynthInitRes, String>>;
 
 #[derive(Debug)]
@@ -48,7 +44,7 @@ pub struct Node {
     last_file: Option<PathBuf>,
     last_virtual_paths: Option<VirtualPaths>,
     last_sample_rate: Option<u32>,
-    last_bank: Option<u8>,
+    last_bank: Option<u16>,
     last_preset: Option<u8>,
     preset_map: Option<PresetMap>,
     gain: f32,
@@ -122,7 +118,7 @@ impl Node {
         })
     }
 
-    fn set_preset(&mut self, bank: u8, preset: u8) -> JsonUpdateKind {
+    fn set_preset(&mut self, bank: u16, preset: u8) -> JsonUpdateKind {
         self.last_bank = Some(bank);
         self.last_preset = Some(preset);
         if let Some(synth) = &mut self.synth {
@@ -459,7 +455,8 @@ impl Render for Node {
             let start = std::time::Instant::now();
             synth.render(tmp_lbuf, tmp_rbuf);
             let duration = start.elapsed();
-            if duration.as_micros() > 2500 {//FIXME: use fluidsynth instead (it's faster, maybe?)
+            if duration.as_micros() > 2500 {
+                //FIXME: use fluidsynth instead (it's faster, maybe?)
                 synth.note_off_all(true);
             }
             // if self.last_timestamp % 100 == 0 {
@@ -495,6 +492,10 @@ impl Render for Node {
 
     fn set_global_transposition(&mut self, transposition: i8) {
         self.global_transposition = transposition;
+    }
+
+    fn set_json_updater(&mut self, updater: JsonUpdater) {
+        // TODO: implement this fn
     }
 
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback) {
@@ -575,7 +576,7 @@ fn get_preset_map(sf: &SoundFont) -> PresetMap {
             preset.add_note_range(r.get_key_range_start() as u8, r.get_key_range_end() as u8);
         }
         map.add_preset(
-            p.get_bank_number() as u8,
+            p.get_bank_number() as u16,
             p.get_patch_number() as u8,
             preset,
         );

@@ -1,0 +1,32 @@
+{
+  "rhythm": {
+    "num_beats": 8,
+    "num_divs": 1
+  },
+  "tempo_bpm": 90.0,
+  "voices": {
+    "num_slots": 8,
+    "voices": [
+      {
+        "channel": 9,
+        "name": "Tick",
+        "instrument_index": 0,
+        "note": 34,
+        "velocity": 127,
+        "slots": [
+          true, false, false, false, false, false, false, false
+        ]
+      },
+      {
+        "channel": 9,
+        "name": "Tock",
+        "instrument_index": 0,
+        "note": 33,
+        "velocity": 127,
+        "slots": [
+          false, true, true, true, true, true, true, true
+        ]
+      }
+    ]
+  }
+}

@@ -174,7 +174,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{audio::info, path::VirtualPaths, render};
+    use crate::{audio::info, control, path::VirtualPaths, render};
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -182,9 +182,11 @@ mod tests {
     fn controller() {
         let (_midi_tx, midi_rx) = crate::midi::create_channel(1);
         let (_req_tx, req_rx) = render::command::create_request_channel(1);
+        let (_dm_ctr_tx, dm_ctr_rx) = control::create_control_channel(1);
         let renderer = Arc::new(Mutex::new(super::Renderer::new(
             midi_rx,
             req_rx,
+            dm_ctr_rx,
             VirtualPaths::default(),
         )));
         let mut audio_ctr = super::Controller::new(renderer);

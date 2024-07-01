@@ -1,14 +1,17 @@
-use std::path::PathBuf;
-
+use super::{
+    command::{midi_filter::UpdateMidiFilterKind, ResponseCallback},
+    velocity_map,
+};
+use crate::{
+    deser::{DeserializationResult, SerializationResult}, json::JsonUpdater, midi, path::VirtualPaths
+};
 use serde::{Deserialize, Serialize};
-
-use crate::{deser::{DeserializationResult, SerializationError, SerializationResult}, midi, path::VirtualPaths};
-
-use super::{command::{midi_filter::UpdateMidiFilterKind, ResponseCallback}, velocity_map};
+use std::path::PathBuf;
 
 pub mod fluidlite_synth;
 pub mod oxi_synth;
 pub mod rusty_synth;
+pub mod sfizz_synth;
 
 pub const NUM_USER_PRESETS: usize = 16;
 
@@ -21,7 +24,8 @@ pub enum RequestKind {
     SetTransposition(i8),
     SetVelocityMapping(velocity_map::Kind),
     SetIgnoreGlobalTransposition(bool),
-    SetBankAndPreset(u8, u8),
+    SetBankAndPreset(u16, u8),
+    MidiMessage(midi::MessageKind),
     SetSfReverbActive(bool),
     SetSfReverbParams {
         room_size: f32,
@@ -40,27 +44,6 @@ pub enum RequestKind {
     SetUserPresetEnabled(usize, bool),
 }
 
-pub type JsonFieldUpdate = (String, serde_json::Value);
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum JsonUpdateKind {
-    InvalidId,
-    Denied,
-    Failed,
-    UpdateFields(Vec<JsonFieldUpdate>),
-}
-
-pub fn update_fields_or_fail(
-    callback: impl FnOnce(&mut Vec<JsonFieldUpdate>) -> Result<(), SerializationError>,
-) -> JsonUpdateKind {
-    let mut updates = Vec::with_capacity(1);
-    if let Ok(()) = callback(&mut updates) {
-        JsonUpdateKind::UpdateFields(updates)
-    } else {
-        JsonUpdateKind::Failed
-    }
-}
-
 pub trait Render: Sync + Send {
     fn render_additive(&mut self, lbuf: &mut [f32], rbuf: &mut [f32]);
     fn reset_rendering(&mut self);
@@ -68,6 +51,7 @@ pub trait Render: Sync + Send {
     fn set_sample_rate(&mut self, sample_rate: u32);
     fn receive_midi_message(&mut self, message: &midi::Message);
     fn set_global_transposition(&mut self, transposition: i8);
+    fn set_json_updater(&mut self, updater: JsonUpdater);
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback);
     fn serialize(&self) -> SerializationResult;
     fn deserialize(&mut self, source: &serde_json::Value) -> DeserializationResult;
