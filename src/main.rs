@@ -7,7 +7,11 @@ use render::{
     node::{self, fluidlite_synth, oxi_synth, rusty_synth, sfizz_synth},
     Renderer,
 };
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::Mutex;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -142,13 +146,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cache2 = Arc::clone(&cache);
     tokio::spawn(async move {
         let req = command::RequestKind::AddNode {
-            kind: "OxiSynth".into(),
+            kind: "SfizzSynth".into(),
         };
         if let Some(res) = send_renderer_request(&req_tx2, req).await {
             cache2.lock().await.cache_renderer_response(&res);
         }
 
-        let file_path = PathBuf::from("samples:/MS_Basic.sf2");
+        let file_path = PathBuf::from("samples:/Basic Piano.dsbundle/Basic Piano.sfz");
         let req = command::RequestKind::NodeRequest {
             id: 0,
             kind: node::RequestKind::LoadFile(file_path),
@@ -158,6 +162,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             cache2.lock().await.cache_renderer_response(&res);
         }
     });
+
+    // tokio::spawn(async move {
+    //     tokio::time::sleep(Duration::from_secs(2)).await;
+    //     tracing::trace!("Playing .mid file...");
+    //     play_midi_file(
+    //         Path::new(
+    //             "/home/sam/Music/Bach_Toccata_and_Fugue_in_D_minor_BWV_565_Busoni_Piano_Arr.mid",
+    //         ),
+    //         midi_tx,
+    //     )
+    //     .await;
+    // });
 
     let shared_state = webserver::SharedState {
         clients: Clients::clone(&clients),
@@ -297,5 +313,118 @@ async fn send_drum_machine_request(
         }
     } else {
         None
+    }
+}
+
+async fn play_midi_file(path: &Path, midi_tx: midi::Sender) {
+    let data = std::fs::read(path).unwrap();
+    let smf = midly::Smf::parse(&data).unwrap();
+    let timing = smf.header.timing;
+
+    let mut max_num_events = 0;
+    for track in &smf.tracks {
+        max_num_events += track.len();
+    }
+    let mut events = Vec::with_capacity(max_num_events);
+
+    enum Event {
+        Tempo(f32),
+        Midi(midi::Message),
+    }
+
+    for (track_num, track) in smf.tracks.iter().enumerate() {
+        let mut time: u128 = 0;
+        for e in track {
+            time += e.delta.as_int() as u128;
+            if let midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(t)) = e.kind {
+                let tempo_bpm = 60000000.0 / t.as_int() as f32;
+                events.push((time, Event::Tempo(tempo_bpm)));
+            } else if let Some(msg) = midly_event_to_midi_message(&e.kind) {
+                events.push((time, Event::Midi(msg)));
+            }
+        }
+    }
+
+    events.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let mut time: u128 = 0;
+
+    for event in &mut events {
+        let new_time = event.0;
+        event.0 -= time;
+        time = new_time;
+    }
+
+    let mut delta_coef = timing_to_sec(timing, 90.0);
+    for (dt, event) in events {
+        match event {
+            Event::Tempo(bpm) => delta_coef = timing_to_sec(timing, bpm),
+            Event::Midi(msg) => {
+                if dt > 0 {
+                    tokio::time::sleep(Duration::from_secs_f32(dt as f32 * delta_coef)).await;
+                }
+                _ = midi_tx.send(msg);
+            },
+        }
+        // tracing::trace!("- {event:?}");
+    }
+    // tokio::spawn(async move {
+    //     tracing::trace!("Track 1:");
+    //     for event in track {
+    //         tracing::trace!("- {event:?}");
+    //     }
+    // });
+}
+
+fn midly_event_to_midi_message(kind: &midly::TrackEventKind) -> Option<midi::Message> {
+    if let midly::TrackEventKind::Midi { channel, message } = kind {
+        let kind = match message {
+            midly::MidiMessage::NoteOff { key, vel } => Some(midi::MessageKind::NoteOff {
+                note: key.as_int(),
+                velocity: vel.as_int(),
+            }),
+            midly::MidiMessage::NoteOn { key, vel } => Some(midi::MessageKind::NoteOn {
+                note: key.as_int(),
+                velocity: vel.as_int(),
+            }),
+            midly::MidiMessage::Aftertouch { key, vel } => {
+                Some(midi::MessageKind::PolyphonicAftertouch {
+                    note: key.as_int(),
+                    pressure: vel.as_int(),
+                })
+            }
+            midly::MidiMessage::Controller { controller, value } => {
+                let kind = midi::ControlChangeKind::from_number(controller.as_int())?;
+                Some(midi::MessageKind::ControlChange {
+                    kind,
+                    value: value.as_int(),
+                })
+            }
+            midly::MidiMessage::ProgramChange { program } => {
+                Some(midi::MessageKind::ProgramChange {
+                    program: program.as_int(),
+                })
+            }
+            midly::MidiMessage::ChannelAftertouch { vel } => {
+                Some(midi::MessageKind::ChannelAftertouch {
+                    pressure: vel.as_int(),
+                })
+            }
+            midly::MidiMessage::PitchBend { bend } => Some(midi::MessageKind::PitchWheel {
+                value: bend.as_int() as u16,
+            }),
+        };
+        Some(midi::Message {
+            kind: kind?,
+            channel: channel.as_int(),
+        })
+    } else {
+        None
+    }
+}
+
+fn timing_to_sec(timing: midly::Timing, tempo_bpm: f32) -> f32 {
+    match timing {
+        midly::Timing::Metrical(tpb) => 60.0 / (tempo_bpm * tpb.as_int() as f32),
+        midly::Timing::Timecode(fps, subframe) => 1.0 / fps.as_f32() / (subframe as f32),
     }
 }
