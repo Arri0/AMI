@@ -29,6 +29,9 @@ impl MidiFilter {
     }
 
     fn does_pass_when_enabled(&self, message: &midi::Message) -> bool {
+        if !self.channels[message.channel as usize] {
+            return false;
+        }
         match message.kind {
             midi::MessageKind::NoteOn { note, .. } => self.notes[note as usize],
             midi::MessageKind::NoteOff { note, .. } => self.notes[note as usize],

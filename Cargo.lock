@@ -66,6 +66,7 @@ dependencies = [
  "midir",
  "midly",
  "oxisynth",
+ "ringbuf",
  "rust-embed",
  "rustysynth",
  "serde",
@@ -1688,6 +1689,15 @@ name = "riff"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9b1a3d5f46d53f4a3478e2be4a5a5ce5108ea58b100dcd139830eae7f79a3a1"
+
+[[package]]
+name = "ringbuf"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c65e4c865bc3d2e3294493dff0acf7e6c259d066e34e22059fa9c39645c3636"
+dependencies = [
+ "crossbeam-utils",
+]
 
 [[package]]
 name = "rust-embed"

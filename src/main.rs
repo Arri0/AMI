@@ -1,15 +1,17 @@
+use audio::output::{BufferTx, DefaultOutputDeviceParams};
 use clap::Parser;
 use control::drum_machine::{self, DrumMachine};
 use json::JsonUpdateKind;
 use midi::MidiReader;
 use render::{
-    command,
+    command::{self, midi_filter},
     node::{self, fluidlite_synth, oxi_synth, rusty_synth, sfizz_synth},
     Renderer,
 };
+use ringbuf::traits::Producer;
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{atomic::AtomicUsize, Arc},
     time::Duration,
 };
 use tokio::sync::Mutex;
@@ -65,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("| Samples directory: {:?}", args.samples);
     info!("| Beats directory: {:?}", args.beats);
 
-    let (midi_tx, midi_rx) = midi::create_channel(32);
+    let (midi_tx, midi_rx) = midi::create_channel(2048);
     let (req_tx, req_rx) = command::create_request_channel(32);
 
     let mut virtual_paths = crate::path::VirtualPaths::default();
@@ -112,68 +114,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let mut renderer = Renderer::new(
-        midi_tx.subscribe(),
-        req_rx,
-        dm_ctr_rx,
-        virtual_paths.clone(),
-    );
+    #[cfg(not(target_os = "windows"))]
+    let sample_rate = 44100;
+
+    #[cfg(target_os = "windows")]
+    let sample_rate = 48000;
+
+    let buffer_size = 2048;
+
+    let audio_output = audio::output::connect_to_default_output_device(DefaultOutputDeviceParams {
+        sample_rate,
+        buffer_size,
+        num_channels: 2,
+    })
+    .expect("Failed to connect to output device");
+
+    let renderer_vp = virtual_paths.clone();
+    let req_num_samples = audio_output.required_num_samples;
+    let lbuf_tx = audio_output.lbuf_tx;
+    let rbuf_tx = audio_output.rbuf_tx;
+
+    let mut renderer = Renderer::new(midi_tx.subscribe(), req_rx, dm_ctr_rx, renderer_vp);
     renderer.register_node_kind("RustySynth", || Box::<rusty_synth::Node>::default());
     renderer.register_node_kind("OxiSynth", || Box::<oxi_synth::Node>::default());
     renderer.register_node_kind("FluidliteSynth", || Box::<fluidlite_synth::Node>::default());
     renderer.register_node_kind("SfizzSynth", || Box::<sfizz_synth::Node>::default());
+    renderer.set_sample_rate(audio_output.sample_rate);
 
-    let renderer = Arc::new(Mutex::new(renderer));
-    let mut audio_ctr = audio::output::Controller::new(renderer);
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        audio_ctr.sample_rate = 44100;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        audio_ctr.sample_rate = 48000;
-    }
-
-    audio_ctr.buffer_size = 2048;
-    audio_ctr
-        .connect_to_default_output_device()
-        .expect("Failed to connect to output device");
+    tokio::spawn(run_renderer(renderer, req_num_samples, (lbuf_tx, rbuf_tx)));
 
     let cache = Arc::new(Mutex::new(webserver::Cache::new(drum_machine_json)));
-
-    let req_tx2 = req_tx.clone();
-    let cache2 = Arc::clone(&cache);
-    tokio::spawn(async move {
-        let req = command::RequestKind::AddNode {
-            kind: "SfizzSynth".into(),
-        };
-        if let Some(res) = send_renderer_request(&req_tx2, req).await {
-            cache2.lock().await.cache_renderer_response(&res);
-        }
-
-        let file_path = PathBuf::from("samples:/Basic Piano.dsbundle/Basic Piano.sfz");
-        let req = command::RequestKind::NodeRequest {
-            id: 0,
-            kind: node::RequestKind::LoadFile(file_path),
-        };
-
-        if let Some(res) = send_renderer_request(&req_tx2, req).await {
-            cache2.lock().await.cache_renderer_response(&res);
-        }
-    });
-
-    // tokio::spawn(async move {
-    //     tokio::time::sleep(Duration::from_secs(2)).await;
-    //     tracing::trace!("Playing .mid file...");
-    //     play_midi_file(
-    //         Path::new(
-    //             "/home/sam/Music/Bach_Toccata_and_Fugue_in_D_minor_BWV_565_Busoni_Piano_Arr.mid",
-    //         ),
-    //         midi_tx,
-    //     )
-    //     .await;
-    // });
 
     let shared_state = webserver::SharedState {
         clients: Clients::clone(&clients),
@@ -269,6 +239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn run_midi_logger(mut midi_rx: midi::Receiver, mut clients: Clients) {
     while let Ok(message) = midi_rx.recv().await {
+        // tracing::trace!("MSG");
         clients.broadcast(ServerMessageKind::MidiEvent(message));
     }
 }
@@ -279,6 +250,39 @@ async fn run_midi_port_watchdog(mut clients: Clients) {
             MidiReader::get_available_ports(),
         ));
         tokio::time::sleep(Duration::from_millis(1000)).await;
+    }
+}
+
+async fn run_renderer(
+    mut renderer: Renderer,
+    req_num_samples: Arc<AtomicUsize>,
+    (mut lbuf_tx, mut rbuf_tx): (BufferTx, BufferTx),
+) {
+    let mut lbuf = vec![];
+    let mut rbuf = vec![];
+
+    loop {
+        while req_num_samples.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+            tokio::time::sleep(Duration::from_micros(10)).await;
+        }
+
+        let curr_buf_size = req_num_samples.load(std::sync::atomic::Ordering::Relaxed);
+        req_num_samples.store(0, std::sync::atomic::Ordering::Relaxed);
+
+        // tracing::trace!("Num samples requested: {curr_buf_size}");
+
+        if lbuf.len() < curr_buf_size {
+            lbuf.resize(curr_buf_size, 0.0);
+            rbuf.resize(curr_buf_size, 0.0);
+        }
+
+        let lbuf_slice = &mut lbuf[..curr_buf_size];
+        let rbuf_slice = &mut rbuf[..curr_buf_size];
+
+        renderer.render(lbuf_slice, rbuf_slice);
+
+        lbuf_tx.push_slice(lbuf_slice);
+        rbuf_tx.push_slice(rbuf_slice);
     }
 }
 
@@ -363,7 +367,7 @@ async fn play_midi_file(path: &Path, midi_tx: midi::Sender) {
                     tokio::time::sleep(Duration::from_secs_f32(dt as f32 * delta_coef)).await;
                 }
                 _ = midi_tx.send(msg);
-            },
+            }
         }
         // tracing::trace!("- {event:?}");
     }
