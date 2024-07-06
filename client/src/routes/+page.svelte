@@ -5,11 +5,12 @@
 	import Keyboard from '../lib/comp/section/comp/Keyboard.svelte';
 	import MainMenu from '../lib/comp/section/comp/MainMenu.svelte';
 	import MidiPorts from '../lib/comp/section/MidiPorts.svelte';
-	import Nodes from '../lib/comp/section/Nodes.svelte';
+	import Nodes from '../lib/comp/section/RenderNodes.svelte';
 	import DrumMachine from '../lib/comp/section/DrumMachine.svelte';
 	import Log from '../lib/comp/section/Log.svelte';
 	import Settings from '../lib/comp/section/Settings.svelte';
 	import FileBrowser from '../lib/comp/file_browser/FileBrowser.svelte';
+	import KeyboardEditor from '../lib/comp/keyboard_editor/KeyboardEditor.svelte';
 
 	let activeKeys;
 	let currentSection;
@@ -17,7 +18,7 @@
 	let currentNode = null;
 
 	function onSectionChanged() {
-		if (previousSection === currentSection && currentSection === 'nodes') {
+		if (previousSection === currentSection && currentSection === 'render-nodes') {
 			currentNode = null;
 		}
 	}
@@ -62,7 +63,7 @@
 <div class="grid-rows-1fr-auto grid h-screen w-screen bg-slate-900 overflow-hidden">
 	{#if currentSection === 'midi-ports'}
 		<MidiPorts />
-	{:else if currentSection === 'nodes'}
+	{:else if currentSection === 'render-nodes'}
 		<Nodes bind:currentNode />
 	{:else if currentSection === 'drum-machine'}
 		<DrumMachine />
@@ -78,4 +79,5 @@
 	{/if}
 	<MainMenu bind:currentSection bind:previousSection on:section-changed={onSectionChanged} />
 	<FileBrowser />
+	<KeyboardEditor />
 </div>

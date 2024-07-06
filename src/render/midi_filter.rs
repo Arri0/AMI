@@ -34,7 +34,7 @@ impl MidiFilter {
         }
         match message.kind {
             midi::MessageKind::NoteOn { note, .. } => self.notes[note as usize],
-            midi::MessageKind::NoteOff { note, .. } => self.notes[note as usize],
+            midi::MessageKind::NoteOff { .. } => true,
             midi::MessageKind::PolyphonicAftertouch { note, .. } => self.notes[note as usize],
             midi::MessageKind::ControlChange { kind, .. } => {
                 self.control_commands[kind.as_number() as usize]
@@ -49,7 +49,7 @@ impl MidiFilter {
 impl Default for MidiFilter {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             channels: vec![true; NUM_CHANNELS],
             notes: vec![true; NUM_NOTES],
             control_commands: vec![true; NUM_CONTROL_COMMANDS],
@@ -72,8 +72,11 @@ pub trait MidiFilterUser {
         match kind {
             Kind::Enabled(flag) => f.enabled = flag,
             Kind::Channel(c, fl) => ur_set_channel(f, c, fl)?,
+            Kind::Channels(channels) => ur_set_channels(f, channels)?,
             Kind::Note(n, fl) => ur_set_note(f, n, fl)?,
+            Kind::Notes(notes) => ur_set_notes(f, notes)?,
             Kind::ControlChange(cc, fl) => ur_set_cc(f, cc, fl)?,
+            Kind::ControlChanges(ccs) => ur_set_ccs(f, ccs)?,
             Kind::ProgramChange(fl) => f.program_change = fl,
             Kind::ChannelAftertouch(fl) => f.channel_aftertouch = fl,
             Kind::PitchWheel(fl) => f.pitch_wheel = fl,
@@ -91,6 +94,15 @@ fn ur_set_channel(filter: &mut MidiFilter, channel: usize, flag: bool) -> Update
     }
 }
 
+fn ur_set_channels(filter: &mut MidiFilter, channels: Vec<bool>) -> UpdateResult {
+    if channels.len() == filter.channels.len() {
+        filter.channels = channels;
+        Ok(())
+    } else {
+        Err(InvalidUpdateRequest)
+    }
+}
+
 fn ur_set_note(filter: &mut MidiFilter, note: usize, flag: bool) -> UpdateResult {
     if note < filter.notes.len() {
         filter.notes[note] = flag;
@@ -100,9 +112,27 @@ fn ur_set_note(filter: &mut MidiFilter, note: usize, flag: bool) -> UpdateResult
     }
 }
 
+fn ur_set_notes(filter: &mut MidiFilter, notes: Vec<bool>) -> UpdateResult {
+    if notes.len() == filter.notes.len() {
+        filter.notes = notes;
+        Ok(())
+    } else {
+        Err(InvalidUpdateRequest)
+    }
+}
+
 fn ur_set_cc(filter: &mut MidiFilter, cc: usize, flag: bool) -> UpdateResult {
     if cc < filter.control_commands.len() {
         filter.control_commands[cc] = flag;
+        Ok(())
+    } else {
+        Err(InvalidUpdateRequest)
+    }
+}
+
+fn ur_set_ccs(filter: &mut MidiFilter, ccs: Vec<bool>) -> UpdateResult {
+    if ccs.len() == filter.control_commands.len() {
+        filter.control_commands = ccs;
         Ok(())
     } else {
         Err(InvalidUpdateRequest)

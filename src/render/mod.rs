@@ -138,8 +138,9 @@ impl Renderer {
                 if id >= self.nodes.len() {
                     respond(responder, ResponseKind::InvalidId);
                 } else {
-                    let cb =
-                        move |kind| respond(responder, ResponseKind::NodeResponse { id, kind });
+                    let cb = move |kind| {
+                        respond(responder, ResponseKind::NodeResponse { id, kind })
+                    };
                     self.nodes[id].1.process_request(kind, Box::new(cb));
                 }
             }

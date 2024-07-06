@@ -129,8 +129,8 @@ impl Node {
         })
     }
 
-    fn update_midi_filter(&mut self, kind: &UpdateMidiFilterKind) -> JsonUpdateKind {
-        if MidiFilterUser::process_update_request(self, *kind).is_ok() {
+    fn update_midi_filter(&mut self, kind: UpdateMidiFilterKind) -> JsonUpdateKind {
+        if MidiFilterUser::process_update_request(self, kind).is_ok() {
             update_fields_or_fail(|updates| {
                 updates.push(("midi_filter".into(), serialize(&self.midi_filter)?));
                 Ok(())
@@ -427,7 +427,7 @@ impl Render for Node {
             RK::SetIgnoreGlobalTransposition(flag) => {
                 cb(self.set_ignore_global_transposition(flag))
             }
-            RK::UpdateMidiFilter(kind) => cb(self.update_midi_filter(&kind)),
+            RK::UpdateMidiFilter(kind) => cb(self.update_midi_filter(kind)),
             RK::SetUserPreset(preset) => cb(self.set_user_preset(preset)),
             RK::SetUserPresetEnabled(p, f) => cb(self.set_user_preset_enabled(p, f)),
             _ => cb(JsonUpdateKind::Denied),

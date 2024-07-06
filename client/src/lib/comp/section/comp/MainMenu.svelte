@@ -2,14 +2,14 @@
     import { createEventDispatcher } from 'svelte';
     import Icon from '@iconify/svelte';
 
-    export let currentSection = 'nodes';
+    export let currentSection = 'render-nodes';
     export let previousSection = currentSection;
 
     let dispatch = createEventDispatcher();
 
     export const sections = [
         ['midi-ports', 'mdi:midi-port'],
-        ['nodes', 'game-icons:grand-piano'],
+        ['render-nodes', 'game-icons:grand-piano'],
         ['drum-machine', 'lucide:drum'],
         ['log', 'octicon:log-16'],
         ['settings', 'material-symbols:settings'],

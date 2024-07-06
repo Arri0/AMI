@@ -1,4 +1,4 @@
-use super::{command::ResponseCallback, drum_machine, CtrSender};
+use super::{command::ResponseCallback, CtrSender};
 use crate::{
     deser::{DeserializationResult, SerializationResult},
     json::JsonUpdater,
@@ -10,6 +10,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+// pub mod drum_machine;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RequestKind {
     SetName(String),
@@ -18,7 +20,16 @@ pub enum RequestKind {
     SavePreset(PathBuf),
     SetUserPreset(usize),
     SetUserPresetEnabled(usize, bool),
-    DrumMachine(drum_machine::RequestKind),
+    AddVoice,
+    RemoveVoice(usize),
+    ClearVoices,
+    SetVoiceName(usize, String),
+    SetVoiceInstrument(usize, Option<usize>),
+    SetVoiceNote(usize, u8),
+    SetVoiceVelocity(usize, u8),
+    SetSlot(usize, usize, bool),
+    SetRhythm(Rhythm),
+    SetTempoBpm(f32),
 }
 
 #[async_trait]

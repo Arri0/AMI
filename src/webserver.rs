@@ -1,5 +1,8 @@
 use crate::{
-    control::drum_machine, json::JsonUpdateKind, midi::{self, MidiReader}, render::command
+    control::drum_machine,
+    json::JsonUpdateKind,
+    midi::{self, MidiReader},
+    render::command,
 };
 use axum::{
     extract::{
@@ -289,7 +292,8 @@ impl Cache {
     pub fn new(drum_machine_json: serde_json::Value) -> Self {
         Self {
             cache: json!({
-                "nodes": [],
+                "render_nodes": [],
+                "control_nodes": [],
                 "drum_machine": drum_machine_json,
             }),
         }
@@ -305,10 +309,12 @@ impl Cache {
             command::ResponseKind::InvalidId => {}
             command::ResponseKind::Denied => {}
             command::ResponseKind::Failed => {}
-            command::ResponseKind::NodeResponse { id, kind } => self.node_update(*id, kind),
-            command::ResponseKind::AddNode { kind, instance, .. } => self.add_node(kind, instance),
-            command::ResponseKind::RemoveNode { id } => self.remove_node(*id),
-            command::ResponseKind::CloneNode { id } => self.clone_node(*id),
+            command::ResponseKind::NodeResponse { id, kind } => self.render_node_update(*id, kind),
+            command::ResponseKind::AddNode { kind, instance, .. } => {
+                self.add_render_node(kind, instance)
+            }
+            command::ResponseKind::RemoveNode { id } => self.remove_render_node(*id),
+            command::ResponseKind::CloneNode { id } => self.clone_render_node(*id),
             command::ResponseKind::MoveNode { id, new_id } => todo!(),
         }
     }
@@ -327,8 +333,8 @@ impl Cache {
         }
     }
 
-    fn add_node(&mut self, kind: &str, value: &serde_json::Value) {
-        if let Some(nodes) = self.cache["nodes"].as_array_mut() {
+    fn add_render_node(&mut self, kind: &str, value: &serde_json::Value) {
+        if let Some(nodes) = self.cache["render_nodes"].as_array_mut() {
             nodes.push(json!({
                 "kind": kind,
                 "instance": value,
@@ -336,21 +342,21 @@ impl Cache {
         }
     }
 
-    fn remove_node(&mut self, id: usize) {
-        if let Some(nodes) = self.cache["nodes"].as_array_mut() {
+    fn remove_render_node(&mut self, id: usize) {
+        if let Some(nodes) = self.cache["render_nodes"].as_array_mut() {
             nodes.remove(id);
         }
     }
 
-    fn clone_node(&mut self, id: usize) {
-        if let Some(nodes) = self.cache["nodes"].as_array_mut() {
+    fn clone_render_node(&mut self, id: usize) {
+        if let Some(nodes) = self.cache["render_nodes"].as_array_mut() {
             if id <= nodes.len() {
                 nodes.push(nodes[id].clone());
             }
         }
     }
 
-    fn node_update(&mut self, node_id: usize, kind: &JsonUpdateKind) {
+    fn render_node_update(&mut self, node_id: usize, kind: &JsonUpdateKind) {
         match kind {
             JsonUpdateKind::InvalidId => {}
             JsonUpdateKind::Denied => {}
@@ -358,7 +364,7 @@ impl Cache {
             JsonUpdateKind::Ok => {}
             JsonUpdateKind::UpdateFields(updates) => {
                 for update in updates {
-                    self.cache["nodes"][node_id]["instance"][&update.0] = update.1.clone();
+                    self.cache["render_nodes"][node_id]["instance"][&update.0] = update.1.clone();
                 }
             }
         }

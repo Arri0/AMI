@@ -4,8 +4,8 @@ use control::drum_machine::{self, DrumMachine};
 use json::JsonUpdateKind;
 use midi::MidiReader;
 use render::{
-    command::{self, midi_filter},
-    node::{self, fluidlite_synth, oxi_synth, rusty_synth, sfizz_synth},
+    command,
+    node::{fluidlite_synth, oxi_synth, rusty_synth, sfizz_synth},
     Renderer,
 };
 use ringbuf::traits::Producer;

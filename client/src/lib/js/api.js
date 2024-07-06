@@ -3,7 +3,25 @@ export class Api extends EventTarget {
         super();
         this.host = host;
         this.port = port;
+        this.connectedMidiInputs = [];
+        this.availableMidiInputs = [];
+        this.cache = {
+            render_nodes: [],
+            drum_machine: {},
+        };
         this.connect();
+    }
+
+    getCache() {
+        return this.cache;
+    }
+
+    getRenderNodes() {
+        return this.cache.render_nodes;
+    }
+
+    getDrumMachine() {
+        return this.cache.drum_machine;
     }
 
     connect() {
@@ -197,15 +215,33 @@ export class Api extends EventTarget {
         });
     }
 
+    async nodeUpdateMidiFilterChannels(id, channels) {
+        return await this.nodeUpdateMidiFilter(id, {
+            'Channels': channels
+        });
+    }
+
     async nodeUpdateMidiFilterNote(id, noteId, enabled) {
         return await this.nodeUpdateMidiFilter(id, {
             'Note': [noteId, enabled]
         });
     }
 
+    async nodeUpdateMidiFilterNotes(id, notes) {
+        return await this.nodeUpdateMidiFilter(id, {
+            'Notes': notes
+        });
+    }
+
     async nodeUpdateMidiFilterControlChange(id, ccId, enabled) {
         return await this.nodeUpdateMidiFilter(id, {
             'ControlChange': [ccId, enabled]
+        });
+    }
+
+    async nodeUpdateMidiFilterControlChanges(id, ccs) {
+        return await this.nodeUpdateMidiFilter(id, {
+            'ControlChanges': ccs
         });
     }
 
@@ -368,34 +404,97 @@ export class Api extends EventTarget {
     }
 
     _onBroadcast(msg) {
-        // this.dispatchEvent(new CustomEvent('broadcast', {
-        //     detail: msg.payload
-        // }));
-
         if ('MidiEvent' in msg) {
             this.dispatchEvent(new CustomEvent('midi', {
                 detail: msg.MidiEvent
             }));
         } else if ('AvailableMidiInputs' in msg) {
+            this.availableMidiInputs = msg.AvailableMidiInputs;
             this.dispatchEvent(new CustomEvent('available-midi-inputs', {
-                detail: msg.AvailableMidiInputs
+                detail: this.availableMidiInputs
             }));
         } else if ('ConnectedMidiInputs' in msg) {
+            this.connectedMidiInputs = msg.ConnectedMidiInputs;
             this.dispatchEvent(new CustomEvent('connected-midi-inputs', {
-                detail: msg.ConnectedMidiInputs
+                detail: this.connectedMidiInputs
             }));
         } else if ('Cache' in msg) {
-            this.dispatchEvent(new CustomEvent('cache', {
-                detail: msg.Cache
-            }));
+            this._onCacheReceived(msg.Cache);
         } else if ('RendererResponse' in msg) {
-            this.dispatchEvent(new CustomEvent('renderer-update', {
-                detail: msg.RendererResponse
-            }));
+            this._onRendererUpdate(msg.RendererResponse);
         } else if ('DrumMachineUpdate' in msg) {
-            this.dispatchEvent(new CustomEvent('drum-machine-update', {
-                detail: msg.DrumMachineUpdate
-            }));
+            this._onDrumMachineUpdate(msg.DrumMachineUpdate);
+        }
+    }
+
+    _onCacheReceived(cache) {
+        this.cache = cache;
+        this.dispatchEvent(new CustomEvent('cache-update', {
+            detail: cache
+        }));
+    }
+
+    _onRendererUpdate(update) {
+        if('NodeResponse' in update) {
+            const nodeId = update.NodeResponse.id;
+            const kind = update.NodeResponse.kind;
+            this._onRenderNodeResponse(nodeId, kind);
+        } else if('AddNode' in update) {
+            this._onAddRenderNode(update.AddNode);
+        } else if('RemoveNode' in update) {
+            this._onRemoveRenderNode(update.RemoveNode.id);
+        } else if('CloneNode' in update) {
+            this._onCloneRenderNode(update.CloneNode.id);
+        }
+
+        this.dispatchEvent(new CustomEvent('cache-update', {
+            detail: this.cache
+        }));
+    }
+
+    _onRenderNodeResponse(id, kind) {
+        if(typeof kind === 'object' && !Array.isArray(kind) && kind !== null) {
+            if('UpdateFields' in kind) {
+                this._onNodeUpdateFields(id, kind.UpdateFields);
+            }
+        }
+    }
+
+    _onNodeUpdateFields(id, fields) {
+        const instance = this.cache.render_nodes[id].instance;
+        for(const field of fields) {
+            instance[field[0]] = field[1];
+        }
+    }
+
+    _onAddRenderNode(node) {
+        this.cache.render_nodes.push(node);
+    }
+
+    _onRemoveRenderNode(id) {
+        this.cache.render_nodes.splice(id, 1);
+    }
+
+    _onCloneRenderNode(id) {
+        const node = JSON.parse(JSON.stringify(this.cache.render_nodes[id]));
+        this.cache.render_nodes.push(node);
+    }
+
+    _onDrumMachineUpdate(kind) {
+        if(typeof kind === 'object' && !Array.isArray(kind) && kind !== null) {
+            if('UpdateFields' in kind) {
+                this._onDrumMachineUpdateFields(kind.UpdateFields);
+            }
+        }
+        this.dispatchEvent(new CustomEvent('cache-update', {
+            detail: this.cache
+        }));
+    }
+
+    _onDrumMachineUpdateFields(fields) {
+        const drumMachine = this.cache.drum_machine;
+        for(const field of fields) {
+            drumMachine[field[0]] = field[1];
         }
     }
 }

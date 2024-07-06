@@ -14,7 +14,7 @@
 		['SfizzSynth', 'Sfizz Synth'],
 	];
 
-	$: nodes = $cache.nodes;
+	$: nodes = $cache.render_nodes;
 
 	async function newNode(kind) {
 		console.log(await getApi().addNode(kind));
@@ -42,7 +42,7 @@
 
 <Section>
 	<Header>
-		<span class="mx-2 inline-block align-middle">Nodes</span>
+		<span class="mx-2 inline-block align-middle">Render Nodes</span>
 		<Icon icon="game-icons:grand-piano" class="inline-block align-middle" />
 	</Header>
 

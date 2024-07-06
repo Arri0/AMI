@@ -1,29 +1,53 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { Api } from './api.js';
 
 let api = null;
 
 export const availableMidiInputs = writable([]);
 export const connectedMidiInputs = writable([]);
-export const cache = writable({
-    nodes: []
-});
+export const cache = writable({ render_nodes: [] });
 
 window.getApi = function() {
     return api;
 }
 
-window.logCache = function() {
-    return cache.update((cache) => {
-        console.log(cache);
-        return cache;
-    })
+window.getCache = function() {
+    return get(cache);
 }
 
-export let openFileBrowser = () => {};
+window.addPiano = async function() {
+    const id = get(cache).render_nodes.length;
+    console.log('id', id);
+    const api = getApi();
+    await api.addNode('SfizzSynth');
+    await api.nodeLoadFile(id, 'samples:/Basic Piano.dsbundle/Basic Piano.sfz');
+    for(let i = 0; i < 16; ++i) {
+        await api.nodeUpdateMidiFilterChannel(id, i, i != 9);
+    }
+}
+
+window.addDrums = async function() {
+    const id = get(cache).render_nodes.length;
+    console.log('id', id);
+    const api = getApi();
+    await api.addNode('OxiSynth');
+    await api.nodeLoadFile(id, 'samples:/MS_Basic.sf2');
+    await api.nodeSetBankAndPreset(id, 128, 25);
+    for(let i = 0; i < 16; ++i) {
+        await api.nodeUpdateMidiFilterChannel(id, i, i == 9);
+    }
+}
+
+export let openFileBrowser = async () => {};
 
 export function registerFileBrowser(openFn) {
     openFileBrowser = openFn;
+}
+
+export let openKeyboardEditor = async () => {};
+
+export function registerKeyboardEditor(openFn) {
+    openKeyboardEditor = openFn;
 }
 
 export function getApi() {
@@ -49,35 +73,9 @@ export function appInit() {
         connectedMidiInputs.set(ev.detail);
     });
 
-    api.addEventListener('cache', (ev) => {
+    api.addEventListener('cache-update', (ev) => {
         cache.set(ev.detail);
-        console.log('cache', ev.detail);
-    });
-
-    api.addEventListener('renderer-update', (ev) => {
-        console.log('renderer-update', ev.detail);
-        const update = ev.detail;
-        if('NodeResponse' in update) {
-            const nodeId = update.NodeResponse.id;
-            const kind = update.NodeResponse.kind;
-            handleNodeResponse(nodeId, kind);
-        } else if('AddNode' in update) {
-            addNode(update.AddNode.kind, update.AddNode.instance);
-        } else if('RemoveNode' in update) {
-            removeNode(update.RemoveNode.id);
-        } else if('CloneNode' in update) {
-            cloneNode(update.CloneNode.id);
-        }
-    });
-
-    api.addEventListener('drum-machine-update', (ev) => {
-        console.log('drum-machine-update', ev.detail);
-        const kind = ev.detail;
-        if(typeof kind === 'object' && !Array.isArray(kind) && kind !== null) {
-            if('UpdateFields' in kind) {
-                updateDrumMachineFields(kind.UpdateFields);
-            }
-        }
+        console.log('cache-update', ev.detail);
     });
 }
 
@@ -86,54 +84,4 @@ export function appDestroy() {
         api.destroy();
         api = null;
     }
-}
-
-function addNode(kind, instance) {
-    cache.update((value) => {
-        value.nodes.push({ kind, instance });
-        return value;
-    });
-}
-
-function removeNode(id) {
-    cache.update((value) => {
-        value.nodes.splice(id, 1);
-        return value;
-    });
-}
-
-function cloneNode(id) {
-    cache.update((value) => {
-        const node = JSON.parse(JSON.stringify(value.nodes[id]));
-        value.nodes.push(node);
-        return value;
-    });
-}
-
-function handleNodeResponse(id, kind) {
-    if(typeof kind === 'object' && !Array.isArray(kind) && kind !== null) {
-        if('UpdateFields' in kind) {
-            updateNodeFields(id, kind.UpdateFields);
-        }
-    }
-}
-
-function updateNodeFields(id, fields) {
-    cache.update((value) => {
-        const instance = value.nodes[id].instance;
-        for(const field of fields) {
-            instance[field[0]] = field[1];
-        }
-        return value;
-    })
-}
-
-function updateDrumMachineFields(fields) {
-    cache.update((value) => {
-        const drum_machine = value.drum_machine;
-        for(const field of fields) {
-            drum_machine[field[0]] = field[1];
-        }
-        return value;
-    })
 }

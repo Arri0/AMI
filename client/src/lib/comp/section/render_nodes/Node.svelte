@@ -9,8 +9,8 @@
 
 	export let currentNode;
 
-	$: kind = $cache.nodes[currentNode]?.kind;
-	$: instance = $cache.nodes[currentNode]?.instance;
+	$: kind = $cache.render_nodes[currentNode]?.kind;
+	$: instance = $cache.render_nodes[currentNode]?.instance;
 
 	function goBackToInstrumentList() {
 		currentNode = null;
