@@ -420,10 +420,10 @@ export class Api extends EventTarget {
             }));
         } else if ('Cache' in msg) {
             this._onCacheReceived(msg.Cache);
-        } else if ('RendererResponse' in msg) {
-            this._onRendererUpdate(msg.RendererResponse);
-        } else if ('DrumMachineUpdate' in msg) {
-            this._onDrumMachineUpdate(msg.DrumMachineUpdate);
+        } else if ('RendererUpdate' in msg) {
+            this._onRendererUpdate(msg.RendererUpdate);
+        } else if ('DrumMachineUpdates' in msg) {
+            this._onDrumMachineUpdates(msg.DrumMachineUpdates);
         }
     }
 
@@ -435,10 +435,10 @@ export class Api extends EventTarget {
     }
 
     _onRendererUpdate(update) {
-        if('NodeResponse' in update) {
-            const nodeId = update.NodeResponse.id;
-            const kind = update.NodeResponse.kind;
-            this._onRenderNodeResponse(nodeId, kind);
+        if('NodeUpdates' in update) {
+            const nodeId = update.NodeUpdates.id;
+            const updates = update.NodeUpdates.updates;
+            this._onRenderNodeUpdates(nodeId, updates);
         } else if('AddNode' in update) {
             this._onAddRenderNode(update.AddNode);
         } else if('RemoveNode' in update) {
@@ -452,18 +452,10 @@ export class Api extends EventTarget {
         }));
     }
 
-    _onRenderNodeResponse(id, kind) {
-        if(typeof kind === 'object' && !Array.isArray(kind) && kind !== null) {
-            if('UpdateFields' in kind) {
-                this._onNodeUpdateFields(id, kind.UpdateFields);
-            }
-        }
-    }
-
-    _onNodeUpdateFields(id, fields) {
+    _onRenderNodeUpdates(id, updates) {
         const instance = this.cache.render_nodes[id].instance;
-        for(const field of fields) {
-            instance[field[0]] = field[1];
+        for(const [key, value] of updates) {
+            instance[key] = value;
         }
     }
 
@@ -480,21 +472,14 @@ export class Api extends EventTarget {
         this.cache.render_nodes.push(node);
     }
 
-    _onDrumMachineUpdate(kind) {
-        if(typeof kind === 'object' && !Array.isArray(kind) && kind !== null) {
-            if('UpdateFields' in kind) {
-                this._onDrumMachineUpdateFields(kind.UpdateFields);
-            }
+    _onDrumMachineUpdates(updates) {
+        console.log('dm updates', updates)
+        const drumMachine = this.cache.drum_machine;
+        for(const [key, value] of updates) {
+            drumMachine[key] = value;
         }
         this.dispatchEvent(new CustomEvent('cache-update', {
             detail: this.cache
         }));
-    }
-
-    _onDrumMachineUpdateFields(fields) {
-        const drumMachine = this.cache.drum_machine;
-        for(const field of fields) {
-            drumMachine[field[0]] = field[1];
-        }
     }
 }

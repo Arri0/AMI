@@ -1,9 +1,8 @@
-use super::{
-    command::{midi_filter::UpdateMidiFilterKind, ResponseCallback},
-    velocity_map,
-};
+use super::{midi_filter, velocity_map};
 use crate::{
-    deser::{DeserializationResult, SerializationResult}, json::JsonUpdater, midi, path::VirtualPaths
+    json::{DeserializationResult, JsonFieldUpdate, SerializationResult},
+    midi,
+    path::VirtualPaths,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -14,6 +13,8 @@ pub mod rusty_synth;
 pub mod sfizz_synth;
 
 pub const NUM_USER_PRESETS: usize = 16;
+
+pub type ResponseCallback = Box<dyn FnOnce(ResponseKind) + 'static + Send + Sync>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RequestKind {
@@ -39,9 +40,17 @@ pub enum RequestKind {
     SetDrumMachineVoiceInstrument(usize, Option<usize>),
     SetDrumMachineVoiceNote(usize, u8),
     SetDrumMachineSlot(usize, usize, u8),
-    UpdateMidiFilter(UpdateMidiFilterKind),
+    UpdateMidiFilter(midi_filter::UpdateKind),
     SetUserPreset(usize),
     SetUserPresetEnabled(usize, bool),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ResponseKind {
+    InvalidId,
+    Denied,
+    Failed,
+    Ok,
 }
 
 pub trait Render: Sync + Send {
@@ -51,10 +60,10 @@ pub trait Render: Sync + Send {
     fn set_sample_rate(&mut self, sample_rate: u32);
     fn receive_midi_message(&mut self, message: &midi::Message);
     fn set_global_transposition(&mut self, transposition: i8);
-    fn set_json_updater(&mut self, updater: JsonUpdater);
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback);
     fn serialize(&self) -> SerializationResult;
     fn deserialize(&mut self, source: &serde_json::Value) -> DeserializationResult;
+    fn json_updates(&mut self) -> Option<Vec<JsonFieldUpdate>>;
     fn clone_node(&self) -> RenderPtr;
 }
 

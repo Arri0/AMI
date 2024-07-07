@@ -1,4 +1,3 @@
-use crate::json::JsonUpdateKind;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -9,7 +8,7 @@ pub type Requester = mpsc::Sender<(RequestKind, Responder)>;
 pub type RequestListener = mpsc::Receiver<(RequestKind, Responder)>;
 pub type Responder = oneshot::Sender<ResponseKind>;
 pub type ResponseListener = oneshot::Receiver<ResponseKind>;
-pub type ResponseCallback = Box<dyn FnOnce(JsonUpdateKind) + 'static + Send + Sync>;
+pub type ResponseCallback = Box<dyn FnOnce(node::ResponseKind) + 'static + Send + Sync>;
 
 pub fn create_request_channel(buffer: usize) -> (Requester, RequestListener) {
     mpsc::channel(buffer)
@@ -36,7 +35,7 @@ pub enum ResponseKind {
     Failed,
     NodeResponse {
         id: usize,
-        kind: JsonUpdateKind,
+        kind: node::ResponseKind,
     },
     AddNode {
         id: usize,

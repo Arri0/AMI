@@ -1,8 +1,7 @@
 use super::{Control, ControlPtr, RequestKind};
 use crate::{
     control::{command::ResponseCallback, CtrSender},
-    deser::{deser_field, deser_field_opt, serialize, DeserializationResult, SerializationResult},
-    json::{update_fields_or_fail, JsonUpdateKind, JsonUpdater},
+    json::{deser_field, deser_field_opt, serialize, DeserializationResult, SerializationResult},
     midi,
     path::VirtualPaths,
     rhythm::Rhythm,

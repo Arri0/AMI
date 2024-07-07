@@ -1,4 +1,5 @@
 {
   "svelte.enable-ts-plugin": true,
-  "prettier.printWidth": 1000
+  "prettier.printWidth": 1000,
+  "cmake.sourceDirectory": "/home/sam/Dev/Rust/Personal/ami_git/external_c_cpp/sfizz_wrapper/sfizz/external/abseil-cpp/absl/functional"
 }

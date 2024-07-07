@@ -1,8 +1,8 @@
 use crate::{
     control::drum_machine,
-    json::JsonUpdateKind,
+    json::JsonFieldUpdate,
     midi::{self, MidiReader},
-    render::command,
+    render::renderer,
 };
 use axum::{
     extract::{
@@ -32,7 +32,7 @@ struct WebClientAssets;
 pub struct SharedState {
     pub clients: Clients,
     pub midi_reader: Arc<Mutex<MidiReader>>,
-    pub cache: Arc<Mutex<Cache>>,
+    pub cache: Cache,
 }
 
 pub async fn run<F, Fut>(http_port: u16, state: SharedState, req_handler: F)
@@ -126,7 +126,7 @@ async fn handle_socket<F, Fut>(
 
     send_broadcast(
         &mut *tx.lock().await,
-        ServerMessageKind::Cache(state.cache.lock().await.get().clone()),
+        ServerMessageKind::Cache(state.cache.to_json().await),
     )
     .await;
 
@@ -254,9 +254,11 @@ pub enum ServerMessageKind {
     AvailableMidiInputs(Vec<String>),
     ConnectedMidiInputs(Vec<Option<String>>),
     Cache(serde_json::Value),
-    RendererResponse(command::ResponseKind),
+    RendererResponse(renderer::ResponseKind),
+    RendererUpdate(renderer::UpdateKind),
     DirInfo(Option<Vec<(bool, PathBuf)>>), // (is_dir, path)
-    DrumMachineUpdate(JsonUpdateKind),
+    DrumMachineResponse(drum_machine::ResponseKind),
+    DrumMachineUpdates(Vec<JsonFieldUpdate>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -272,7 +274,7 @@ pub enum ClientMessageKind {
     Report(String),
     ConnectMidiInput(usize, String),
     DisconnectMidiInput(usize),
-    RendererRequest(command::RequestKind),
+    RendererRequest(renderer::RequestKind),
     ReadDir(PathBuf),
     DrumMachineRequest(drum_machine::RequestKind),
 }
@@ -284,57 +286,39 @@ pub struct ClientMessage {
     payload: ClientMessageKind,
 }
 
+#[derive(Clone)]
 pub struct Cache {
-    cache: serde_json::Value,
+    cache: Arc<Mutex<serde_json::Value>>,
 }
 
+// Thread safe cache
 impl Cache {
     pub fn new(drum_machine_json: serde_json::Value) -> Self {
         Self {
-            cache: json!({
+            cache: Arc::new(Mutex::new(json!({
                 "render_nodes": [],
                 "control_nodes": [],
                 "drum_machine": drum_machine_json,
-            }),
+            }))),
         }
     }
 
-    pub fn get(&self) -> &serde_json::Value {
-        &self.cache
+    pub async fn to_json(&self) -> serde_json::Value {
+        let cache = self.cache.lock().await;
+        cache.clone()
     }
 
-    pub fn cache_renderer_response(&mut self, res: &command::ResponseKind) {
-        match res {
-            command::ResponseKind::InvalidNodeKind => todo!(),
-            command::ResponseKind::InvalidId => {}
-            command::ResponseKind::Denied => {}
-            command::ResponseKind::Failed => {}
-            command::ResponseKind::NodeResponse { id, kind } => self.render_node_update(*id, kind),
-            command::ResponseKind::AddNode { kind, instance, .. } => {
-                self.add_render_node(kind, instance)
-            }
-            command::ResponseKind::RemoveNode { id } => self.remove_render_node(*id),
-            command::ResponseKind::CloneNode { id } => self.clone_render_node(*id),
-            command::ResponseKind::MoveNode { id, new_id } => todo!(),
+    pub async fn drum_machine_updates(&mut self, updates: &[JsonFieldUpdate]) {
+        let mut cache = self.cache.lock().await;
+        let dm = &mut cache["drum_machine"];
+        for update in updates {
+            dm[&update.0] = update.1.clone();
         }
     }
 
-    pub fn chache_drum_machine_update(&mut self, kind: &JsonUpdateKind) {
-        match kind {
-            JsonUpdateKind::InvalidId => {}
-            JsonUpdateKind::Denied => {}
-            JsonUpdateKind::Failed => {}
-            JsonUpdateKind::Ok => {}
-            JsonUpdateKind::UpdateFields(updates) => {
-                for update in updates {
-                    self.cache["drum_machine"][&update.0] = update.1.clone();
-                }
-            }
-        }
-    }
-
-    fn add_render_node(&mut self, kind: &str, value: &serde_json::Value) {
-        if let Some(nodes) = self.cache["render_nodes"].as_array_mut() {
+    pub async fn add_render_node(&mut self, kind: &str, value: &serde_json::Value) {
+        let mut cache = self.cache.lock().await;
+        if let Some(nodes) = cache["render_nodes"].as_array_mut() {
             nodes.push(json!({
                 "kind": kind,
                 "instance": value,
@@ -342,31 +326,35 @@ impl Cache {
         }
     }
 
-    fn remove_render_node(&mut self, id: usize) {
-        if let Some(nodes) = self.cache["render_nodes"].as_array_mut() {
+    pub async fn remove_render_node(&mut self, id: usize) {
+        let mut cache = self.cache.lock().await;
+        if let Some(nodes) = cache["render_nodes"].as_array_mut() {
             nodes.remove(id);
         }
     }
 
-    fn clone_render_node(&mut self, id: usize) {
-        if let Some(nodes) = self.cache["render_nodes"].as_array_mut() {
+    pub async fn clone_render_node(&mut self, id: usize) {
+        let mut cache = self.cache.lock().await;
+        if let Some(nodes) = cache["render_nodes"].as_array_mut() {
             if id <= nodes.len() {
                 nodes.push(nodes[id].clone());
             }
         }
     }
 
-    fn render_node_update(&mut self, node_id: usize, kind: &JsonUpdateKind) {
-        match kind {
-            JsonUpdateKind::InvalidId => {}
-            JsonUpdateKind::Denied => {}
-            JsonUpdateKind::Failed => {}
-            JsonUpdateKind::Ok => {}
-            JsonUpdateKind::UpdateFields(updates) => {
-                for update in updates {
-                    self.cache["render_nodes"][node_id]["instance"][&update.0] = update.1.clone();
-                }
-            }
+    pub async fn move_render_node(&mut self, id: usize, new_id: usize) {
+        let mut cache = self.cache.lock().await;
+        if let Some(nodes) = cache["render_nodes"].as_array_mut() {
+            let node = nodes.remove(id);
+            nodes.insert(new_id, node);
+        }
+    }
+
+    pub async fn render_node_updates(&mut self, node_id: usize, updates: &[JsonFieldUpdate]) {
+        let mut cache = self.cache.lock().await;
+        let node = &mut cache["render_nodes"][node_id]["instance"];
+        for update in updates {
+            node[&update.0] = update.1.clone();
         }
     }
 }

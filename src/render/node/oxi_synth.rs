@@ -1,13 +1,18 @@
-use super::Render;
+use super::{Render, ResponseCallback};
 use crate::{
-    deser::{deser_field_opt, serialize, DeserializationResult, SerializationResult}, json::{update_fields_or_fail, JsonUpdateKind, JsonUpdater}, midi::{self, ControlChangeKind}, path::VirtualPaths, render::{
+    json::{
+        deser_field_opt, serialize, DeserializationResult, JsonFieldUpdate, SerializationResult,
+    },
+    json_try,
+    midi::{self, ControlChangeKind},
+    path::VirtualPaths,
+    render::{
         self,
-        command::{midi_filter::UpdateMidiFilterKind, ResponseCallback},
         midi_filter::{self, MidiFilterUser},
-        node::RequestKind,
+        node::{RequestKind, ResponseKind},
         preset_map::{Preset, PresetMap},
         velocity_map,
-    }
+    },
 };
 use oxisynth::{SoundFont, Synth};
 use serde::{Deserialize, Serialize};
@@ -83,24 +88,24 @@ pub struct Node {
     sf_load_handle: Option<SoundFontLoadHandle>,
     sf_load_res_cb: Option<ResponseCallback>,
     reverb: ReverbParams,
-    json_updater: Option<JsonUpdater>,
+    json_updates: Vec<JsonFieldUpdate>,
 }
 
 impl Node {
-    fn set_name(&mut self, name: &str) -> JsonUpdateKind {
+    fn set_name(&mut self, name: &str) -> ResponseKind {
         self.name = name.into();
-        update_fields_or_fail(|updates| {
-            updates.push(("name".to_owned(), serialize(name)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("name".to_owned(), serialize(name)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_enabled(&mut self, flag: bool) -> JsonUpdateKind {
+    fn set_enabled(&mut self, flag: bool) -> ResponseKind {
         self.enabled = flag;
-        update_fields_or_fail(|updates| {
-            updates.push(("enabled".to_owned(), serialize(flag)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("enabled".to_owned(), serialize(flag)?))
+        }
+        ResponseKind::Ok
     }
 
     fn load_file(&mut self, path: &Path, cb: ResponseCallback) {
@@ -108,43 +113,43 @@ impl Node {
         if let Ok(()) = self.load_file_non_blocking() {
             self.sf_load_res_cb = Some(cb);
         } else {
-            cb(JsonUpdateKind::Failed);
+            cb(ResponseKind::Failed);
         }
     }
 
-    fn set_gain(&mut self, gain: f32) -> JsonUpdateKind {
+    fn set_gain(&mut self, gain: f32) -> ResponseKind {
         self.gain = gain;
-        update_fields_or_fail(|updates| {
-            updates.push(("gain".into(), serialize(gain)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("gain".into(), serialize(gain)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_transposition(&mut self, transposition: i8) -> JsonUpdateKind {
+    fn set_transposition(&mut self, transposition: i8) -> ResponseKind {
         self.transposition = transposition;
-        update_fields_or_fail(|updates| {
-            updates.push(("transposition".into(), serialize(transposition)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("transposition".into(), serialize(transposition)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_velocity_mapping(&mut self, mapping: velocity_map::Kind) -> JsonUpdateKind {
+    fn set_velocity_mapping(&mut self, mapping: velocity_map::Kind) -> ResponseKind {
         self.velocity_mapping = mapping;
-        update_fields_or_fail(|updates| {
-            updates.push(("velocity_mapping".into(), serialize(mapping)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("velocity_mapping".into(), serialize(mapping)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_ignore_global_transposition(&mut self, flag: bool) -> JsonUpdateKind {
+    fn set_ignore_global_transposition(&mut self, flag: bool) -> ResponseKind {
         self.ignore_global_transposition = flag;
-        update_fields_or_fail(|updates| {
-            updates.push(("ignore_global_transposition".into(), serialize(flag)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("ignore_global_transposition".into(), serialize(flag)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_preset(&mut self, bank: u16, preset: u8) -> JsonUpdateKind {
+    fn set_preset(&mut self, bank: u16, preset: u8) -> ResponseKind {
         self.last_bank = Some(bank);
         self.last_preset = Some(preset);
         if let Some(synth) = &mut self.synth {
@@ -154,30 +159,31 @@ impl Node {
                     channel: 0,
                     program_id: preset,
                 });
-                update_fields_or_fail(|updates| {
-                    updates.push(("bank".into(), serialize(bank)?));
-                    updates.push(("preset".into(), serialize(preset)?));
-                    Ok(())
-                })
+                json_try! {
+                    self.json_updates.push(("bank".into(), serialize(bank)?))
+                    self.json_updates.push(("preset".into(), serialize(preset)?))
+                }
+                ResponseKind::Ok
             } else {
-                JsonUpdateKind::Failed
+                ResponseKind::Failed
             }
         } else {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         }
     }
 
-    fn set_reverb_active(&mut self, active: bool) -> JsonUpdateKind {
+    fn set_reverb_active(&mut self, active: bool) -> ResponseKind {
         self.reverb.active = active;
 
         if let Some(synth) = &mut self.synth {
             synth.get_reverb_mut().set_active(active);
         }
 
-        update_fields_or_fail(|updates| {
-            updates.push(("reverb".into(), serialize(self.reverb)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("reverb".into(), serialize(self.reverb)?))
+        }
+
+        ResponseKind::Ok
     }
 
     fn set_reverb_params(
@@ -186,7 +192,7 @@ impl Node {
         damping: f32,
         width: f32,
         level: f32,
-    ) -> JsonUpdateKind {
+    ) -> ResponseKind {
         self.reverb.room_size = room_size;
         self.reverb.damping = damping;
         self.reverb.width = width;
@@ -198,44 +204,45 @@ impl Node {
                 .set_reverb_params(room_size, damping, width, level);
         }
 
-        update_fields_or_fail(|updates| {
-            updates.push(("reverb".into(), serialize(self.reverb)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("reverb".into(), serialize(self.reverb)?))
+        }
+
+        ResponseKind::Ok
     }
 
-    fn update_midi_filter(&mut self, kind: UpdateMidiFilterKind) -> JsonUpdateKind {
+    fn update_midi_filter(&mut self, kind: midi_filter::UpdateKind) -> ResponseKind {
         if MidiFilterUser::process_update_request(self, kind).is_ok() {
-            update_fields_or_fail(|updates| {
-                updates.push(("midi_filter".into(), serialize(&self.midi_filter)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("midi_filter".into(), serialize(&self.midi_filter)?))
+            }
+            ResponseKind::Ok
         } else {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         }
     }
 
-    fn set_user_preset(&mut self, preset: usize) -> JsonUpdateKind {
+    fn set_user_preset(&mut self, preset: usize) -> ResponseKind {
         if preset >= self.user_presets.len() {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         } else {
             self.enabled = self.user_presets[preset];
-            update_fields_or_fail(|updates| {
-                updates.push(("enabled".into(), serialize(self.enabled)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("enabled".into(), serialize(self.enabled)?))
+            }
+            ResponseKind::Ok
         }
     }
 
-    fn set_user_preset_enabled(&mut self, preset: usize, flag: bool) -> JsonUpdateKind {
+    fn set_user_preset_enabled(&mut self, preset: usize, flag: bool) -> ResponseKind {
         if preset >= self.user_presets.len() {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         } else {
             self.user_presets[preset] = flag;
-            update_fields_or_fail(|updates| {
-                updates.push(("user_presets".into(), serialize(&self.user_presets)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("user_presets".into(), serialize(&self.user_presets)?))
+            }
+            ResponseKind::Ok
         }
     }
 
@@ -493,7 +500,7 @@ impl Node {
             if let Ok(Ok(res)) = res {
                 self.handle_sf_load_success(res);
             } else {
-                self.call_sf_load_cb(JsonUpdateKind::Failed);
+                self.call_sf_load_cb(ResponseKind::Failed);
             }
         }
     }
@@ -512,26 +519,20 @@ impl Node {
                 program_id: preset,
             });
         }
-        self.call_sf_load_cb(update_fields_or_fail(|updates| {
-            updates.push(("loaded_file".to_owned(), serialize(self.last_file.clone())?));
-            updates.push(("preset_map".to_owned(), serialize(self.preset_map.clone())?));
-            updates.push(("bank".to_owned(), serialize(self.last_bank)?));
-            updates.push(("preset".to_owned(), serialize(self.last_preset)?));
-            Ok(())
-        }));
+        json_try! {
+            self.json_updates.push(("loaded_file".to_owned(), serialize(self.last_file.clone())?))
+            self.json_updates.push(("preset_map".to_owned(), serialize(self.preset_map.clone())?))
+            self.json_updates.push(("bank".to_owned(), serialize(self.last_bank)?))
+            self.json_updates.push(("preset".to_owned(), serialize(self.last_preset)?))
+        }
+        self.call_sf_load_cb(ResponseKind::Ok);
     }
 
-    fn call_sf_load_cb(&mut self, res: JsonUpdateKind) {
+    fn call_sf_load_cb(&mut self, res: ResponseKind) {
         let mut cb: Option<ResponseCallback> = None;
         mem::swap(&mut self.sf_load_res_cb, &mut cb);
         if let Some(cb) = cb {
             cb(res);
-        }
-    }
-
-    fn broadcast_update(&self, kind: JsonUpdateKind) {
-        if let Some(updater) = &self.json_updater {
-            updater.broadcast(kind);
         }
     }
 }
@@ -562,7 +563,7 @@ impl Default for Node {
             sf_load_handle: None,
             sf_load_res_cb: None,
             reverb: Default::default(),
-            json_updater: None,
+            json_updates: Default::default(),
         }
     }
 }
@@ -593,7 +594,7 @@ impl Clone for Node {
             sf_load_handle: None,
             sf_load_res_cb: None,
             reverb: self.reverb,
-            json_updater: None,
+            json_updates: Default::default(),
         };
         _ = res.load_file_non_blocking();
         res
@@ -643,10 +644,6 @@ impl Render for Node {
         self.global_transposition = transposition;
     }
 
-    fn set_json_updater(&mut self, updater: JsonUpdater) {
-        self.json_updater = Some(updater);
-    }
-
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback) {
         type RK = RequestKind;
         match kind {
@@ -662,12 +659,12 @@ impl Render for Node {
             RK::SetBankAndPreset(bank, preset) => cb(self.set_preset(bank, preset)),
             RK::MidiMessage(kind) => {
                 self.process_midi_message_kind(&kind);
-                cb(update_fields_or_fail(|updates| {
+                json_try! {
                     //TODO: support indices and fields for optimization
-                    updates.push(("cc".into(), serialize(self.last_cc.clone())?));
-                    updates.push(("pitch_wheel".into(), serialize(self.last_pitch_wheel)?));
-                    Ok(())
-                }))
+                    self.json_updates.push(("cc".into(), serialize(self.last_cc.clone())?))
+                    self.json_updates.push(("pitch_wheel".into(), serialize(self.last_pitch_wheel)?))
+                }
+                cb(ResponseKind::Ok)
             }
             RK::SetSfReverbActive(active) => cb(self.set_reverb_active(active)),
             RK::SetSfReverbParams {
@@ -679,7 +676,7 @@ impl Render for Node {
             RK::UpdateMidiFilter(kind) => cb(self.update_midi_filter(kind)),
             RK::SetUserPreset(preset) => cb(self.set_user_preset(preset)),
             RK::SetUserPresetEnabled(p, f) => cb(self.set_user_preset_enabled(p, f)),
-            _ => cb(JsonUpdateKind::Denied),
+            _ => cb(ResponseKind::Denied),
         };
     }
 
@@ -725,6 +722,16 @@ impl Render for Node {
         deser_field_opt(source, "user_presets", |v| self.user_presets = v)?;
         deser_field_opt(source, "reverb", |v| self.reverb = v)?;
         Ok(())
+    }
+
+    fn json_updates(&mut self) -> Option<Vec<JsonFieldUpdate>> {
+        if !self.json_updates.is_empty() {
+            let mut new_updates = Default::default();
+            mem::swap(&mut new_updates, &mut self.json_updates);
+            Some(new_updates)
+        } else {
+            None
+        }
     }
 
     fn clone_node(&self) -> super::RenderPtr {

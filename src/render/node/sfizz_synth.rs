@@ -1,12 +1,18 @@
-use super::Render;
+use super::{Render, ResponseCallback, ResponseKind};
 use crate::{
-    deser::{deser_field_opt, serialize, DeserializationResult, SerializationResult}, json::{update_fields_or_fail, JsonUpdateKind, JsonUpdater}, midi::{self, ControlChangeKind}, path::VirtualPaths, render::{
+    json::{
+        deser_field_opt, serialize, DeserializationResult, JsonFieldUpdate, SerializationResult,
+    },
+    json_try,
+    midi::{self, ControlChangeKind},
+    path::VirtualPaths,
+    render::{
         self,
-        command::{midi_filter::UpdateMidiFilterKind, ResponseCallback},
         midi_filter::{self, MidiFilterUser},
         node::RequestKind,
         velocity_map,
-    }, synth::sfizz
+    },
+    synth::sfizz,
 };
 use serde_json::json;
 use std::{
@@ -37,26 +43,26 @@ pub struct Node {
     tmp_lbuf: Vec<f32>,
     tmp_rbuf: Vec<f32>,
     user_presets: Vec<bool>,
-    json_updater: Option<JsonUpdater>,
     file_load_handle: Option<SoundFontLoadHandle>,
     file_load_res_cb: Option<ResponseCallback>,
+    json_updates: Vec<JsonFieldUpdate>,
 }
 
 impl Node {
-    fn set_name(&mut self, name: &str) -> JsonUpdateKind {
+    fn set_name(&mut self, name: &str) -> ResponseKind {
         self.name = name.into();
-        update_fields_or_fail(|updates| {
-            updates.push(("name".to_owned(), serialize(name)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("name".to_owned(), serialize(name)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_enabled(&mut self, flag: bool) -> JsonUpdateKind {
+    fn set_enabled(&mut self, flag: bool) -> ResponseKind {
         self.enabled = flag;
-        update_fields_or_fail(|updates| {
-            updates.push(("enabled".to_owned(), serialize(flag)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("enabled".to_owned(), serialize(flag)?))
+        }
+        ResponseKind::Ok
     }
 
     fn load_file(&mut self, path: &Path, cb: ResponseCallback) {
@@ -64,7 +70,7 @@ impl Node {
         if let Ok(()) = self.load_file_non_blocking() {
             self.file_load_res_cb = Some(cb);
         } else {
-            cb(JsonUpdateKind::Failed);
+            cb(ResponseKind::Failed);
         }
     }
 
@@ -97,70 +103,70 @@ impl Node {
         }
     }
 
-    fn set_gain(&mut self, gain: f32) -> JsonUpdateKind {
+    fn set_gain(&mut self, gain: f32) -> ResponseKind {
         self.gain = gain;
-        update_fields_or_fail(|updates| {
-            updates.push(("gain".into(), serialize(gain)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("gain".into(), serialize(gain)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_transposition(&mut self, transposition: i8) -> JsonUpdateKind {
+    fn set_transposition(&mut self, transposition: i8) -> ResponseKind {
         self.transposition = transposition;
-        update_fields_or_fail(|updates| {
-            updates.push(("transposition".into(), serialize(transposition)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("transposition".into(), serialize(transposition)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_velocity_mapping(&mut self, mapping: &velocity_map::Kind) -> JsonUpdateKind {
+    fn set_velocity_mapping(&mut self, mapping: &velocity_map::Kind) -> ResponseKind {
         self.velocity_mapping = *mapping;
-        update_fields_or_fail(|updates| {
-            updates.push(("velocity_mapping".into(), serialize(mapping)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("velocity_mapping".into(), serialize(mapping)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_ignore_global_transposition(&mut self, flag: bool) -> JsonUpdateKind {
+    fn set_ignore_global_transposition(&mut self, flag: bool) -> ResponseKind {
         self.ignore_global_transposition = flag;
-        update_fields_or_fail(|updates| {
-            updates.push(("ignore_global_transposition".into(), serialize(flag)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("ignore_global_transposition".into(), serialize(flag)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn update_midi_filter(&mut self, kind: UpdateMidiFilterKind) -> JsonUpdateKind {
+    fn update_midi_filter(&mut self, kind: midi_filter::UpdateKind) -> ResponseKind {
         if MidiFilterUser::process_update_request(self, kind).is_ok() {
-            update_fields_or_fail(|updates| {
-                updates.push(("midi_filter".into(), serialize(&self.midi_filter)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("midi_filter".into(), serialize(&self.midi_filter)?))
+            }
+            ResponseKind::Ok
         } else {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         }
     }
 
-    fn set_user_preset(&mut self, preset: usize) -> JsonUpdateKind {
+    fn set_user_preset(&mut self, preset: usize) -> ResponseKind {
         if preset >= self.user_presets.len() {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         } else {
             self.enabled = self.user_presets[preset];
-            update_fields_or_fail(|updates| {
-                updates.push(("enabled".into(), serialize(self.enabled)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("enabled".into(), serialize(self.enabled)?))
+            }
+            ResponseKind::Ok
         }
     }
 
-    fn set_user_preset_enabled(&mut self, preset: usize, flag: bool) -> JsonUpdateKind {
+    fn set_user_preset_enabled(&mut self, preset: usize, flag: bool) -> ResponseKind {
         if preset >= self.user_presets.len() {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         } else {
             self.user_presets[preset] = flag;
-            update_fields_or_fail(|updates| {
-                updates.push(("user_presets".into(), serialize(&self.user_presets)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("user_presets".into(), serialize(&self.user_presets)?))
+            }
+            ResponseKind::Ok
         }
     }
 
@@ -287,20 +293,20 @@ impl Node {
             if let Ok(Ok(res)) = res {
                 self.handle_sf_load_success(res);
             } else {
-                self.call_sf_load_cb(JsonUpdateKind::Failed);
+                self.call_sf_load_cb(ResponseKind::Failed);
             }
         }
     }
 
     fn handle_sf_load_success(&mut self, synth: Mutex<sfizz::Synth>) {
         self.synth = Some(synth);
-        self.call_sf_load_cb(update_fields_or_fail(|updates| {
-            updates.push(("loaded_file".to_owned(), serialize(self.last_file.clone())?));
-            Ok(())
-        }));
+        json_try! {
+            self.json_updates.push(("loaded_file".to_owned(), serialize(self.last_file.clone())?))
+        }
+        self.call_sf_load_cb(ResponseKind::Ok);
     }
 
-    fn call_sf_load_cb(&mut self, res: JsonUpdateKind) {
+    fn call_sf_load_cb(&mut self, res: ResponseKind) {
         let mut cb: Option<ResponseCallback> = None;
         mem::swap(&mut self.file_load_res_cb, &mut cb);
         if let Some(cb) = cb {
@@ -325,12 +331,12 @@ impl Default for Node {
             global_transposition: 0,
             velocity_mapping: velocity_map::Kind::Identity,
             ignore_global_transposition: false,
-            tmp_lbuf: Vec::new(),
-            tmp_rbuf: Vec::new(),
+            tmp_lbuf: Default::default(),
+            tmp_rbuf: Default::default(),
             user_presets: vec![true; super::NUM_USER_PRESETS],
-            json_updater: None,
             file_load_handle: None,
             file_load_res_cb: None,
+            json_updates: Default::default(),
         }
     }
 }
@@ -354,9 +360,9 @@ impl Clone for Node {
             tmp_lbuf: vec![0.0; self.tmp_lbuf.len()],
             tmp_rbuf: vec![0.0; self.tmp_rbuf.len()],
             user_presets: self.user_presets.clone(),
-            json_updater: None,
             file_load_handle: None,
             file_load_res_cb: None,
+            json_updates: Default::default(),
         };
         _ = res.load_file_non_blocking();
         res
@@ -411,10 +417,6 @@ impl Render for Node {
         self.global_transposition = transposition;
     }
 
-    fn set_json_updater(&mut self, updater: JsonUpdater) {
-        self.json_updater = Some(updater);
-    }
-
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback) {
         type RK = RequestKind;
         match kind {
@@ -430,7 +432,7 @@ impl Render for Node {
             RK::UpdateMidiFilter(kind) => cb(self.update_midi_filter(kind)),
             RK::SetUserPreset(preset) => cb(self.set_user_preset(preset)),
             RK::SetUserPresetEnabled(p, f) => cb(self.set_user_preset_enabled(p, f)),
-            _ => cb(JsonUpdateKind::Denied),
+            _ => cb(ResponseKind::Denied),
         }
     }
 
@@ -465,6 +467,16 @@ impl Render for Node {
         deser_field_opt(source, "loaded_file", |v| self.last_file = v)?;
         deser_field_opt(source, "user_presets", |v| self.user_presets = v)?;
         Ok(())
+    }
+
+    fn json_updates(&mut self) -> Option<Vec<JsonFieldUpdate>> {
+        if !self.json_updates.is_empty() {
+            let mut new_updates = Default::default();
+            mem::swap(&mut new_updates, &mut self.json_updates);
+            Some(new_updates)
+        } else {
+            None
+        }
     }
 
     fn clone_node(&self) -> super::RenderPtr {

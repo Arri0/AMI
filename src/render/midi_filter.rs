@@ -2,11 +2,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::midi;
 
-use super::command::midi_filter::UpdateMidiFilterKind;
-
 const NUM_CHANNELS: usize = 16;
 const NUM_NOTES: usize = 128;
 const NUM_CONTROL_COMMANDS: usize = 128;
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum UpdateKind {
+    Enabled(bool),
+    Channel(usize, bool),
+    Channels(Vec<bool>),
+    Note(usize, bool),
+    Notes(Vec<bool>),
+    ControlChange(usize, bool),
+    ControlChanges(Vec<bool>),
+    ProgramChange(bool),
+    ChannelAftertouch(bool),
+    PitchWheel(bool),
+}
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct MidiFilter {
@@ -66,20 +78,19 @@ pub type UpdateResult = Result<(), InvalidUpdateRequest>;
 pub trait MidiFilterUser {
     fn midi_filter_mut(&mut self) -> &mut MidiFilter;
 
-    fn process_update_request(&mut self, kind: UpdateMidiFilterKind) -> UpdateResult {
-        use UpdateMidiFilterKind as Kind;
+    fn process_update_request(&mut self, kind: UpdateKind) -> UpdateResult {
         let f = self.midi_filter_mut();
         match kind {
-            Kind::Enabled(flag) => f.enabled = flag,
-            Kind::Channel(c, fl) => ur_set_channel(f, c, fl)?,
-            Kind::Channels(channels) => ur_set_channels(f, channels)?,
-            Kind::Note(n, fl) => ur_set_note(f, n, fl)?,
-            Kind::Notes(notes) => ur_set_notes(f, notes)?,
-            Kind::ControlChange(cc, fl) => ur_set_cc(f, cc, fl)?,
-            Kind::ControlChanges(ccs) => ur_set_ccs(f, ccs)?,
-            Kind::ProgramChange(fl) => f.program_change = fl,
-            Kind::ChannelAftertouch(fl) => f.channel_aftertouch = fl,
-            Kind::PitchWheel(fl) => f.pitch_wheel = fl,
+            UpdateKind::Enabled(flag) => f.enabled = flag,
+            UpdateKind::Channel(c, fl) => ur_set_channel(f, c, fl)?,
+            UpdateKind::Channels(channels) => ur_set_channels(f, channels)?,
+            UpdateKind::Note(n, fl) => ur_set_note(f, n, fl)?,
+            UpdateKind::Notes(notes) => ur_set_notes(f, notes)?,
+            UpdateKind::ControlChange(cc, fl) => ur_set_cc(f, cc, fl)?,
+            UpdateKind::ControlChanges(ccs) => ur_set_ccs(f, ccs)?,
+            UpdateKind::ProgramChange(fl) => f.program_change = fl,
+            UpdateKind::ChannelAftertouch(fl) => f.channel_aftertouch = fl,
+            UpdateKind::PitchWheel(fl) => f.pitch_wheel = fl,
         }
         Ok(())
     }

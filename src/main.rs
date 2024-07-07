@@ -1,12 +1,10 @@
 use audio::output::{BufferTx, DefaultOutputDeviceParams};
 use clap::Parser;
 use control::drum_machine::{self, DrumMachine};
-use json::JsonUpdateKind;
 use midi::MidiReader;
 use render::{
-    command,
     node::{fluidlite_synth, oxi_synth, rusty_synth, sfizz_synth},
-    Renderer,
+    renderer::{self, Renderer},
 };
 use ringbuf::traits::Producer;
 use std::{
@@ -21,7 +19,6 @@ use webserver::{Clients, ServerMessageKind};
 
 pub mod audio;
 pub mod control;
-pub mod deser;
 pub mod json;
 pub mod midi;
 pub mod path;
@@ -68,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("| Beats directory: {:?}", args.beats);
 
     let (midi_tx, midi_rx) = midi::create_channel(2048);
-    let (req_tx, req_rx) = command::create_request_channel(32);
+    let (req_tx, req_rx) = renderer::create_request_channel(32);
 
     let mut virtual_paths = crate::path::VirtualPaths::default();
     virtual_paths.insert("samples:".into(), args.samples);
@@ -106,10 +103,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let drum_machine_json = drum_machine
         .serialize()
         .expect("Failed to serialize Drum Machine");
+    let cache = webserver::Cache::new(drum_machine_json);
 
+    let mut dm_cache = cache.clone();
+    let mut dm_clients = clients.clone();
     tokio::spawn(async move {
         loop {
             drum_machine.tick().await;
+            if let Some(updates) = drum_machine.json_updates() {
+                dm_cache.drum_machine_updates(&updates).await;
+                dm_clients.broadcast(ServerMessageKind::DrumMachineUpdates(updates));
+            }
             tokio::time::sleep(Duration::from_secs_f32(drum_machine.period().min(0.01))).await;
         }
     });
@@ -134,7 +138,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lbuf_tx = audio_output.lbuf_tx;
     let rbuf_tx = audio_output.rbuf_tx;
 
-    let mut renderer = Renderer::new(midi_tx.subscribe(), req_rx, dm_ctr_rx, renderer_vp);
+    let mut renderer = Renderer::new(
+        midi_tx.subscribe(),
+        req_rx,
+        dm_ctr_rx,
+        renderer_vp,
+        clients.clone(),
+        cache.clone(),
+    );
     renderer.register_node_kind("RustySynth", || Box::<rusty_synth::Node>::default());
     renderer.register_node_kind("OxiSynth", || Box::<oxi_synth::Node>::default());
     renderer.register_node_kind("FluidliteSynth", || Box::<fluidlite_synth::Node>::default());
@@ -143,18 +154,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::spawn(run_renderer(renderer, req_num_samples, (lbuf_tx, rbuf_tx)));
 
-    let cache = Arc::new(Mutex::new(webserver::Cache::new(drum_machine_json)));
-
     let shared_state = webserver::SharedState {
         clients: Clients::clone(&clients),
         midi_reader: Arc::clone(&midi_reader),
-        cache: Arc::clone(&cache),
+        cache: cache.clone(),
     };
 
     webserver::run(3000, shared_state, move |addr, req| {
         let midi_reader = Arc::clone(&midi_reader);
         let mut clients = Clients::clone(&clients);
-        let cache = Arc::clone(&cache);
         let req_tx = req_tx.clone();
         let dm_req_tx = dm_req_tx.clone();
         let vp = virtual_paths.clone();
@@ -191,11 +199,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 ClientMessageKind::RendererRequest(req) => {
                     let res = send_renderer_request(&req_tx, req).await;
-                    let mut cache = cache.lock().await;
                     if let Some(res) = res {
-                        cache.cache_renderer_response(&res);
-                        clients.broadcast(ServerMessageKind::RendererResponse(res));
-                        ServerMessageKind::Ack
+                        ServerMessageKind::RendererResponse(res)
                     } else {
                         ServerMessageKind::Nak
                     }
@@ -220,11 +225,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 ClientMessageKind::DrumMachineRequest(req) => {
                     let res = send_drum_machine_request(&dm_req_tx, req).await;
-                    let mut cache = cache.lock().await;
                     if let Some(res) = res {
-                        cache.chache_drum_machine_update(&res);
-                        clients.broadcast(ServerMessageKind::DrumMachineUpdate(res));
-                        ServerMessageKind::Ack
+                        ServerMessageKind::DrumMachineResponse(res)
                     } else {
                         ServerMessageKind::Nak
                     }
@@ -260,37 +262,43 @@ async fn run_renderer(
 ) {
     let mut lbuf = vec![];
     let mut rbuf = vec![];
+    let mut counter = 0;
 
     loop {
-        while req_num_samples.load(std::sync::atomic::Ordering::Relaxed) == 0 {
-            tokio::time::sleep(Duration::from_micros(10)).await;
+        counter += 1;
+        if counter >= 10 {
+            counter = 0;
+            renderer.update().await;
         }
 
         let curr_buf_size = req_num_samples.load(std::sync::atomic::Ordering::Relaxed);
-        req_num_samples.store(0, std::sync::atomic::Ordering::Relaxed);
 
-        // tracing::trace!("Num samples requested: {curr_buf_size}");
+        if curr_buf_size > 0 {
+            if lbuf.len() < curr_buf_size {
+                lbuf.resize(curr_buf_size, 0.0);
+                rbuf.resize(curr_buf_size, 0.0);
+            }
 
-        if lbuf.len() < curr_buf_size {
-            lbuf.resize(curr_buf_size, 0.0);
-            rbuf.resize(curr_buf_size, 0.0);
+            let lbuf_slice = &mut lbuf[..curr_buf_size];
+            let rbuf_slice = &mut rbuf[..curr_buf_size];
+
+            renderer.render(lbuf_slice, rbuf_slice);
+
+            lbuf_tx.push_slice(lbuf_slice);
+            rbuf_tx.push_slice(rbuf_slice);
+
+            req_num_samples.store(0, std::sync::atomic::Ordering::Relaxed);
         }
 
-        let lbuf_slice = &mut lbuf[..curr_buf_size];
-        let rbuf_slice = &mut rbuf[..curr_buf_size];
-
-        renderer.render(lbuf_slice, rbuf_slice);
-
-        lbuf_tx.push_slice(lbuf_slice);
-        rbuf_tx.push_slice(rbuf_slice);
+        tokio::time::sleep(Duration::from_micros(10)).await;
     }
 }
 
 async fn send_renderer_request(
-    req_tx: &command::Requester,
-    req: command::RequestKind,
-) -> Option<command::ResponseKind> {
-    let (res_tx, res_rx) = command::create_response_channel();
+    req_tx: &renderer::Requester,
+    req: renderer::RequestKind,
+) -> Option<renderer::ResponseKind> {
+    let (res_tx, res_rx) = renderer::create_response_channel();
 
     if let Ok(()) = req_tx.send((req, res_tx)).await {
         if let Ok(response_kind) = res_rx.await {
@@ -306,7 +314,7 @@ async fn send_renderer_request(
 async fn send_drum_machine_request(
     req_tx: &drum_machine::Requester,
     req: drum_machine::RequestKind,
-) -> Option<JsonUpdateKind> {
+) -> Option<drum_machine::ResponseKind> {
     let (res_tx, res_rx) = drum_machine::create_response_channel();
 
     if let Ok(()) = req_tx.send((req, res_tx)).await {
@@ -336,7 +344,7 @@ async fn play_midi_file(path: &Path, midi_tx: midi::Sender) {
         Midi(midi::Message),
     }
 
-    for (track_num, track) in smf.tracks.iter().enumerate() {
+    for track in smf.tracks.iter() {
         let mut time: u128 = 0;
         for e in track {
             time += e.delta.as_int() as u128;
@@ -369,14 +377,7 @@ async fn play_midi_file(path: &Path, midi_tx: midi::Sender) {
                 _ = midi_tx.send(msg);
             }
         }
-        // tracing::trace!("- {event:?}");
     }
-    // tokio::spawn(async move {
-    //     tracing::trace!("Track 1:");
-    //     for event in track {
-    //         tracing::trace!("- {event:?}");
-    //     }
-    // });
 }
 
 fn midly_event_to_midi_message(kind: &midly::TrackEventKind) -> Option<midi::Message> {

@@ -1,15 +1,16 @@
 use crate::{
-    deser::{deser_field, deser_field_opt, serialize, DeserializationResult, SerializationResult},
-    json::{update_fields_or_fail, JsonUpdateKind},
+    json::{
+        deser_field, deser_field_opt, serialize, DeserializationResult, JsonFieldUpdate,
+        SerializationResult,
+    },
+    json_try,
     path::VirtualPaths,
     rhythm::Rhythm,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    fs,
-    path::{Path, PathBuf},
-    time::{Duration, SystemTime},
+    fs, mem, path::{Path, PathBuf}, time::{Duration, SystemTime}
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -17,8 +18,8 @@ use super::{ControlMessage, CtrSender};
 
 pub type Requester = mpsc::Sender<(RequestKind, Responder)>;
 pub type RequestListener = mpsc::Receiver<(RequestKind, Responder)>;
-pub type Responder = oneshot::Sender<JsonUpdateKind>;
-pub type ResponseListener = oneshot::Receiver<JsonUpdateKind>;
+pub type Responder = oneshot::Sender<ResponseKind>;
+pub type ResponseListener = oneshot::Receiver<ResponseKind>;
 
 pub fn create_request_channel(buffer: usize) -> (Requester, RequestListener) {
     mpsc::channel(buffer)
@@ -46,6 +47,13 @@ pub enum RequestKind {
     SavePreset(PathBuf),
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ResponseKind {
+    Denied,
+    Failed,
+    Ok,
+}
+
 pub struct DrumMachine {
     enabled: bool,
     voices: Voices,
@@ -58,6 +66,7 @@ pub struct DrumMachine {
     current_beat: u8,
     current_div: u8,
     virtual_paths: VirtualPaths,
+    json_updates: Vec<JsonFieldUpdate>,
 }
 
 impl DrumMachine {
@@ -74,58 +83,59 @@ impl DrumMachine {
             current_beat: 0,
             current_div: 0,
             virtual_paths,
+            json_updates: Default::default(),
         };
         res.voices.set_num_slots(res.rhythm.num_slots());
         res
     }
 
-    fn set_enabled(&mut self, flag: bool) -> JsonUpdateKind {
+    fn set_enabled(&mut self, flag: bool) -> ResponseKind {
         self.enabled = flag;
         if flag {
             self.reset();
         }
-        update_fields_or_fail(|updates| {
-            updates.push(("enabled".to_owned(), serialize(flag)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("enabled".to_owned(), serialize(flag)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn add_voice(&mut self) -> JsonUpdateKind {
+    fn add_voice(&mut self) -> ResponseKind {
         self.voices.add_voice();
-        update_fields_or_fail(|updates| {
-            updates.push(("voices".into(), serialize(&self.voices)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn remove_voice(&mut self, index: usize) -> JsonUpdateKind {
+    fn remove_voice(&mut self, index: usize) -> ResponseKind {
         if self.voices.remove_voice(index).is_ok() {
-            update_fields_or_fail(|updates| {
-                updates.push(("voices".into(), serialize(&self.voices)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+            }
+            ResponseKind::Ok
         } else {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         }
     }
 
-    fn clear_voices(&mut self) -> JsonUpdateKind {
+    fn clear_voices(&mut self) -> ResponseKind {
         self.voices.clear();
-        update_fields_or_fail(|updates| {
-            updates.push(("voices".into(), serialize(&self.voices)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_voice_name(&mut self, voice_index: usize, name: String) -> JsonUpdateKind {
+    fn set_voice_name(&mut self, voice_index: usize, name: String) -> ResponseKind {
         let res = self.voices.set_voice_name(voice_index, name).is_ok();
         if res {
-            update_fields_or_fail(|updates| {
-                updates.push(("voices".into(), serialize(&self.voices)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+            }
+            ResponseKind::Ok
         } else {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         }
     }
 
@@ -133,89 +143,89 @@ impl DrumMachine {
         &mut self,
         voice_index: usize,
         instrument_index: Option<usize>,
-    ) -> JsonUpdateKind {
+    ) -> ResponseKind {
         let res = self
             .voices
             .set_voice_instrument(voice_index, instrument_index)
             .is_ok();
         if res {
-            update_fields_or_fail(|updates| {
-                updates.push(("voices".into(), serialize(&self.voices)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+            }
+            ResponseKind::Ok
         } else {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         }
     }
 
-    fn set_voice_note(&mut self, voice_index: usize, note: u8) -> JsonUpdateKind {
+    fn set_voice_note(&mut self, voice_index: usize, note: u8) -> ResponseKind {
         if self.voices.set_voice_note(voice_index, note).is_ok() {
-            update_fields_or_fail(|updates| {
-                updates.push(("voices".into(), serialize(&self.voices)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+            }
+            ResponseKind::Ok
         } else {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         }
     }
 
-    fn set_voice_velocity(&mut self, voice_index: usize, velocity: u8) -> JsonUpdateKind {
+    fn set_voice_velocity(&mut self, voice_index: usize, velocity: u8) -> ResponseKind {
         if self
             .voices
             .set_voice_velocity(voice_index, velocity)
             .is_ok()
         {
-            update_fields_or_fail(|updates| {
-                updates.push(("voices".into(), serialize(&self.voices)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+            }
+            ResponseKind::Ok
         } else {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         }
     }
 
-    fn set_slot(&mut self, voice_index: usize, slot_index: usize, enabled: bool) -> JsonUpdateKind {
+    fn set_slot(&mut self, voice_index: usize, slot_index: usize, enabled: bool) -> ResponseKind {
         let res = self
             .voices
             .set_slot(voice_index, slot_index, enabled)
             .is_ok();
         if res {
-            update_fields_or_fail(|updates| {
-                updates.push(("voices".into(), serialize(&self.voices)?));
-                Ok(())
-            })
+            json_try! {
+                self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+            }
+            ResponseKind::Ok
         } else {
-            JsonUpdateKind::Failed
+            ResponseKind::Failed
         }
     }
 
-    fn set_rhythm(&mut self, rhythm: Rhythm) -> JsonUpdateKind {
+    fn set_rhythm(&mut self, rhythm: Rhythm) -> ResponseKind {
         self.rhythm = rhythm;
         self.voices.set_num_slots(self.rhythm.num_slots());
-        update_fields_or_fail(|updates| {
-            updates.push(("rhythm".to_owned(), serialize(rhythm)?));
-            updates.push(("voices".into(), serialize(&self.voices)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("rhythm".to_owned(), serialize(rhythm)?))
+            self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn set_tempo_bpm(&mut self, tempo_bpm: f32) -> JsonUpdateKind {
+    fn set_tempo_bpm(&mut self, tempo_bpm: f32) -> ResponseKind {
         self.tempo_bpm = tempo_bpm;
-        update_fields_or_fail(|updates| {
-            updates.push(("tempo_bpm".to_owned(), serialize(tempo_bpm)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("tempo_bpm".to_owned(), serialize(tempo_bpm)?))
+        }
+        ResponseKind::Ok
     }
 
-    fn reset(&mut self) -> JsonUpdateKind {
+    fn reset(&mut self) -> ResponseKind {
         self.last_time = self.timestamp() - self.period();
         self.current_beat = self.rhythm.num_beats - 1;
         self.current_div = self.rhythm.num_divs - 1;
-        update_fields_or_fail(|updates| {
-            updates.push(("current_beat".to_owned(), serialize(self.current_beat)?));
-            updates.push(("current_div".to_owned(), serialize(self.current_div)?));
-            Ok(())
-        })
+        json_try! {
+            self.json_updates.push(("current_beat".to_owned(), serialize(self.current_beat)?))
+            self.json_updates.push(("current_div".to_owned(), serialize(self.current_div)?))
+        }
+        ResponseKind::Ok
     }
 
     fn slot_index(&self, beat_num: u8, div_num: u8) -> usize {
@@ -300,36 +310,36 @@ impl DrumMachine {
         }
     }
 
-    fn load_preset_from_file(&mut self, path: &Path) -> JsonUpdateKind {
+    fn load_preset_from_file(&mut self, path: &Path) -> ResponseKind {
         if let Some(path) = self.virtual_paths.translate(path) {
             if let Ok(file) = fs::read_to_string(path) {
                 if let Ok(source) = serde_json::from_str(&file) {
                     if self.deserialize_preset(&source).is_ok() {
                         self.reset();
-                        return update_fields_or_fail(|updates| {
-                            updates.push(("rhythm".to_owned(), serialize(self.rhythm)?));
-                            updates.push(("voices".into(), serialize(&self.voices)?));
-                            updates.push(("tempo_bpm".into(), serialize(self.tempo_bpm)?));
-                            Ok(())
-                        });
+                        json_try! {
+                            self.json_updates.push(("rhythm".to_owned(), serialize(self.rhythm)?))
+                            self.json_updates.push(("voices".into(), serialize(&self.voices)?))
+                            self.json_updates.push(("tempo_bpm".into(), serialize(self.tempo_bpm)?))
+                        }
+                        return ResponseKind::Ok;
                     }
                 }
             }
         }
-        JsonUpdateKind::Failed
+        ResponseKind::Failed
     }
 
-    fn save_preset_to_file(&self, path: &Path) -> JsonUpdateKind {
+    fn save_preset_to_file(&self, path: &Path) -> ResponseKind {
         if let Some(path) = self.virtual_paths.translate(path) {
             if let Ok(source) = self.serialize_preset() {
                 if let Ok(source) = serde_json::to_string_pretty(&source) {
                     if fs::write(path, source).is_ok() {
-                        return JsonUpdateKind::Ok;
+                        return ResponseKind::Ok;
                     }
                 }
             }
         }
-        JsonUpdateKind::Failed
+        ResponseKind::Failed
     }
 
     fn deserialize_preset(&mut self, source: &serde_json::Value) -> DeserializationResult {
@@ -348,7 +358,7 @@ impl DrumMachine {
         Ok(result)
     }
 
-    fn process_request(&mut self, kind: RequestKind) -> JsonUpdateKind {
+    fn process_request(&mut self, kind: RequestKind) -> ResponseKind {
         match kind {
             RequestKind::SetEnabled(flag) => self.set_enabled(flag),
             RequestKind::AddVoice => self.add_voice(),
@@ -387,6 +397,16 @@ impl DrumMachine {
         // do not load current_beat and current_div
         self.voices.set_num_slots(self.rhythm.num_slots());
         Ok(())
+    }
+
+    pub fn json_updates(&mut self) -> Option<Vec<JsonFieldUpdate>> {
+        if !self.json_updates.is_empty() {
+            let mut new_updates = Default::default();
+            mem::swap(&mut new_updates, &mut self.json_updates);
+            Some(new_updates)
+        } else {
+            None
+        }
     }
 }
 

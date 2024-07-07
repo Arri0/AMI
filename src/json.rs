@@ -1,49 +1,60 @@
-use crate::deser::SerializationError;
-use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use serde::{de::DeserializeOwned, Serialize};
+
+#[derive(Debug, PartialEq)]
+pub struct Error;
+
+pub type SerializationResult = Result<serde_json::Value, Error>;
+pub type DeserializationResult = Result<(), Error>;
 
 pub type JsonFieldUpdate = (String, serde_json::Value);
-pub type JsonUpdateSender = mpsc::Sender<(usize, JsonUpdateKind)>;
-pub type JsonUpdateListener = mpsc::Receiver<(usize, JsonUpdateKind)>;
 
-pub fn create_json_update_channel(buffer: usize) -> (JsonUpdateSender, JsonUpdateListener) {
-    mpsc::channel(buffer)
+pub fn serialize<T: Serialize>(value: T) -> SerializationResult {
+    serde_json::to_value(value).map_err(|_| Error)
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum JsonUpdateKind {
-    InvalidId,
-    Denied,
-    Failed,
-    Ok,
-    UpdateFields(Vec<JsonFieldUpdate>),
-}
-
-pub fn update_fields_or_fail(
-    callback: impl FnOnce(&mut Vec<JsonFieldUpdate>) -> Result<(), SerializationError>,
-) -> JsonUpdateKind {
-    let mut updates = Vec::with_capacity(1);
-    if let Ok(()) = callback(&mut updates) {
-        JsonUpdateKind::UpdateFields(updates)
+pub fn serialize_or_null<T: Serialize>(value: T) -> serde_json::Value {
+    if let Ok(val) = serde_json::to_value(value) {
+        val
     } else {
-        JsonUpdateKind::Failed
+        serde_json::Value::Null
     }
 }
 
-pub struct JsonUpdater {
-    id: usize,
-    tx: JsonUpdateSender,
+//TODO: make this return value instead of calling callback
+pub fn deser_field<T: DeserializeOwned>(
+    source: &serde_json::Value,
+    field_name: &str,
+    callback: impl FnOnce(T),
+) -> Result<(), Error> {
+    if let Some(val) = source.get(field_name) {
+        let val: T = serde_json::from_value::<T>(val.clone()).map_err(|_| Error)?;
+        callback(val);
+        Ok(())
+    } else {
+        Err(Error)
+    }
 }
 
-impl JsonUpdater {
-    pub fn new(id: usize, tx: JsonUpdateSender) -> Self {
-        Self { id, tx }
+pub fn deser_field_opt<T: DeserializeOwned>(
+    source: &serde_json::Value,
+    field_name: &str,
+    callback: impl FnOnce(T),
+) -> Result<(), Error> {
+    if let Some(val) = source.get(field_name) {
+        let val: T = serde_json::from_value(val.clone()).map_err(|_| Error)?;
+        callback(val);
     }
+    Ok(())
+}
 
-    pub async fn broadcast(&self, kind: JsonUpdateKind) {
-        self.tx
-            .send((self.id, kind))
-            .await
-            .unwrap_or_else(|e| tracing::error!("Error: {e}"));
-    }
+#[macro_export]
+macro_rules! json_try {
+    ($($stmt:stmt)*) => {
+        (|| -> Result<(), $crate::json::Error> {
+            $(
+                $stmt
+            )*
+            Ok(())
+        })().unwrap_or_else(|_| tracing::error!("Unexpected Serialization/Deserialization error!"));
+    };
 }

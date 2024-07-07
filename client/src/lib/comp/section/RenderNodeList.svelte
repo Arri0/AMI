@@ -30,9 +30,7 @@
 
 	async function toggleNode(id) {
 		const prevValue = nodes[id]["instance"].enabled;
-		if(await getApi().nodeSetEnabled(id, !prevValue) != 'Ack') {
-			console.error('toggleNode: fail');
-		}
+		console.log(await getApi().nodeSetEnabled(id, !prevValue));
 	}
 
 	function openNode(id) {

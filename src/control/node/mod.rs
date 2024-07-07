@@ -1,7 +1,6 @@
 use super::{command::ResponseCallback, CtrSender};
 use crate::{
-    deser::{DeserializationResult, SerializationResult},
-    json::JsonUpdater,
+    json::{DeserializationResult, JsonFieldUpdate, SerializationResult},
     midi,
     path::VirtualPaths,
     rhythm::Rhythm,
@@ -32,6 +31,14 @@ pub enum RequestKind {
     SetTempoBpm(f32),
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ResponseKind {
+    InvalidId,
+    Denied,
+    Failed,
+    Ok,
+}
+
 #[async_trait]
 pub trait Control: Sync + Send {
     async fn reset(&mut self);
@@ -41,10 +48,11 @@ pub trait Control: Sync + Send {
     fn set_tempo_bpm(&mut self, tempo_bpm: f32);
     fn receive_midi_message(&mut self, message: &midi::Message);
     fn set_control_sender(&mut self, sender: CtrSender);
-    fn set_json_updater(&mut self, updater: JsonUpdater);
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback);
+    fn render_node_moved(&mut self, id: usize, new_id: usize);
     fn serialize(&self) -> SerializationResult;
     fn deserialize(&mut self, source: &serde_json::Value) -> DeserializationResult;
+    fn next_json_update(&mut self) -> Option<JsonFieldUpdate>;
     fn clone_node(&self) -> ControlPtr;
 }
 
