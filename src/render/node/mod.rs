@@ -41,7 +41,6 @@ pub enum RequestKind {
     SetDrumMachineVoiceNote(usize, u8),
     SetDrumMachineSlot(usize, usize, u8),
     UpdateMidiFilter(midi_filter::UpdateKind),
-    SetUserPreset(usize),
     SetUserPresetEnabled(usize, bool),
 }
 
@@ -60,8 +59,9 @@ pub trait Render: Sync + Send {
     fn set_sample_rate(&mut self, sample_rate: u32);
     fn receive_midi_message(&mut self, message: &midi::Message);
     fn set_global_transposition(&mut self, transposition: i8);
+    fn set_user_preset(&mut self, preset: usize);
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback);
-    fn serialize(&self) -> SerializationResult;
+    fn serialize(&self) -> SerializationResult; //TODO: return serde_json::Value instead
     fn deserialize(&mut self, source: &serde_json::Value) -> DeserializationResult;
     fn json_updates(&mut self) -> Option<Vec<JsonFieldUpdate>>;
     fn clone_node(&self) -> RenderPtr;

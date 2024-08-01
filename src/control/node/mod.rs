@@ -1,4 +1,4 @@
-use super::{command::ResponseCallback, CtrSender};
+use super::CtrSender;
 use crate::{
     json::{DeserializationResult, JsonFieldUpdate, SerializationResult},
     midi,
@@ -9,7 +9,11 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-// pub mod drum_machine;
+pub mod drum_machine;
+
+pub type ResponseCallback = Box<dyn FnOnce(ResponseKind) + 'static + Send + Sync>;
+
+pub const NUM_USER_PRESETS: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RequestKind {
@@ -17,7 +21,6 @@ pub enum RequestKind {
     SetEnabled(bool),
     LoadPreset(PathBuf),
     SavePreset(PathBuf),
-    SetUserPreset(usize),
     SetUserPresetEnabled(usize, bool),
     AddVoice,
     RemoveVoice(usize),
@@ -26,9 +29,8 @@ pub enum RequestKind {
     SetVoiceInstrument(usize, Option<usize>),
     SetVoiceNote(usize, u8),
     SetVoiceVelocity(usize, u8),
+    SetVoiceChannel(usize, u8),
     SetSlot(usize, usize, bool),
-    SetRhythm(Rhythm),
-    SetTempoBpm(f32),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -41,18 +43,19 @@ pub enum ResponseKind {
 
 #[async_trait]
 pub trait Control: Sync + Send {
-    async fn reset(&mut self);
+    fn reset(&mut self);
     async fn beat_tick(&mut self, beat_num: u8, div_num: u8);
     fn set_virtual_paths(&mut self, vp: VirtualPaths);
     fn set_rhythm(&mut self, rhythm: Rhythm);
     fn set_tempo_bpm(&mut self, tempo_bpm: f32);
-    fn receive_midi_message(&mut self, message: &midi::Message);
     fn set_control_sender(&mut self, sender: CtrSender);
+    fn set_user_preset(&mut self, preset: usize);
+    fn receive_midi_message(&mut self, message: &midi::Message);
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback);
     fn render_node_moved(&mut self, id: usize, new_id: usize);
-    fn serialize(&self) -> SerializationResult;
+    fn serialize(&self) -> SerializationResult; //TODO: return serde_json::Value instead
     fn deserialize(&mut self, source: &serde_json::Value) -> DeserializationResult;
-    fn next_json_update(&mut self) -> Option<JsonFieldUpdate>;
+    fn json_updates(&mut self) -> Option<Vec<JsonFieldUpdate>>;
     fn clone_node(&self) -> ControlPtr;
 }
 

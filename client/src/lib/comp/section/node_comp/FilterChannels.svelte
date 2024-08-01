@@ -2,7 +2,7 @@
 	import { createEventDispatcher } from 'svelte';
     import { range } from '$lib/js/util.js';
 	import Icon from '@iconify/svelte';
-	import Button from '../../../form/Button.svelte';
+	import Button from '../../form/Button.svelte';
 
 	export let name;
 	export let channels = new Array(16).fill(true);
@@ -34,8 +34,8 @@
     <div class="flex flex-row gap-4">
 	    <div class="grow overflow-hidden text-ellipsis text-nowrap">{name}</div>
         <div class="flex flex-row gap-1">
-            <Button rounded="left" on:click={allChannelsOn}><span class="text-nowrap">All On</span></Button>
-            <Button rounded="right" on:click={allChannelsOff}><span class="text-nowrap">All Off</span></Button>
+            <Button class="rounded-l-full pl-3" on:click={allChannelsOn}><span class="text-nowrap">All On</span></Button>
+            <Button class="rounded-r-full pr-3" on:click={allChannelsOff}><span class="text-nowrap">All Off</span></Button>
         </div>
     </div>
 	<div class="flex flex-row gap-1 flex-wrap place-content-end">

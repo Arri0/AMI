@@ -2,7 +2,7 @@
 <script>
     import { createEventDispatcher } from 'svelte';
 	import NumericField from './NumericField.svelte';
-    import Select from '../../../form/Select.svelte';
+    import Select from '../../form/Select.svelte';
 
 	export let name = '';
     export let value = 'Identity';
@@ -55,7 +55,7 @@
 	<div class="grow overflow-hidden text-ellipsis text-nowrap">{name}</div>
     <div class="flex flex-col gap-2 place-items-end">
         <div class="w-44">
-            <Select options={['Identity', 'Linear']} bind:value={kindValue} on:change={emitChange} />
+            <Select class="w-full rounded-full" options={['Identity', 'Linear']} bind:value={kindValue} on:change={emitChange} />
         </div>
         {#if kindValue === 'Linear'}
             <hr class="border border-slate-800 w-full my-2" />

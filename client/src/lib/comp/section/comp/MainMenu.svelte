@@ -8,9 +8,9 @@
     let dispatch = createEventDispatcher();
 
     export const sections = [
-        ['midi-ports', 'mdi:midi-port'],
+        ['controller', 'lucide:drum'],
         ['render-nodes', 'game-icons:grand-piano'],
-        ['drum-machine', 'lucide:drum'],
+        ['control-nodes', 'ant-design:control-filled'],
         ['log', 'octicon:log-16'],
         ['settings', 'material-symbols:settings'],
     ];

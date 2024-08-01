@@ -18,6 +18,10 @@ html, body {
     animation-name: anim-flip;
 }
 
+.flip-x {
+    transform: scaleX(-1);
+}
+
 @keyframes anim-flip {
     0%   {transform: scaleX(1);}
     49%  {transform: scaleX(1);}

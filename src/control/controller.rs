@@ -1,14 +1,15 @@
-use crate::render::node;
+use super::node::{self, ControlPtr};
 use crate::{
     control,
-    json::JsonFieldUpdate,
+    json::{deser_field_opt, expect_serialize, DeserializationResult, JsonFieldUpdate},
     midi,
     path::VirtualPaths,
+    rhythm::Rhythm,
     webserver::{Cache, Clients, ServerMessageKind},
 };
-use node::RenderPtr;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde_json::json;
+use std::{collections::HashMap, time::SystemTime};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::error;
@@ -28,6 +29,10 @@ pub fn create_response_channel() -> (Responder, ResponseListener) {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RequestKind {
+    Reset,
+    SetEnabled(bool),
+    SetTempoBpm(f32),
+    SetRhythm(Rhythm),
     SetUserPreset(usize),
     NodeRequest { id: usize, kind: node::RequestKind },
     AddNode { kind: String },
@@ -48,6 +53,13 @@ pub enum ResponseKind {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum UpdateKind {
+    Enabled(bool),
+    TempoBpm(f32),
+    Rhythm(Rhythm),
+    BeatState {
+        beat: u8,
+        div: u8,
+    },
     AddNode {
         id: usize,
         kind: String,
@@ -69,83 +81,84 @@ pub enum UpdateKind {
     },
 }
 
-pub type NodeKindConstructor = Box<dyn Fn() -> RenderPtr + 'static + Sync + Send>;
+pub type NodeKindConstructor = Box<dyn Fn() -> ControlPtr + 'static + Sync + Send>;
 
-pub struct Renderer {
+pub struct Controller {
+    enabled: bool,
     registered_node_kinds: HashMap<String, NodeKindConstructor>,
-    nodes: Vec<(String, RenderPtr)>,
+    nodes: Vec<(String, ControlPtr)>,
     midi_rx: midi::Receiver,
     req_rx: RequestListener,
-    dm_ctr_rx: control::CtrReceiver,
-    sample_rate: Option<u32>,
-    global_transposition: i8,
+    ctr_tx: control::CtrSender,
+    tempo_bpm: f32,
+    rhythm: Rhythm,
     virtual_paths: VirtualPaths,
     clients: Clients,
     cache: Cache,
+    last_start: SystemTime,
+    last_time: f32,
+    current_beat: u8,
+    current_div: u8,
 }
 
-impl Renderer {
+impl Controller {
     pub fn new(
         midi_rx: midi::Receiver,
         req_rx: RequestListener,
-        dm_ctr_rx: control::CtrReceiver,
+        ctr_tx: control::CtrSender,
         virtual_paths: VirtualPaths,
         clients: Clients,
         cache: Cache,
     ) -> Self {
+        let rhythm = Default::default();
         Self {
+            enabled: false,
             registered_node_kinds: Default::default(),
             nodes: Default::default(),
             midi_rx,
             req_rx,
-            dm_ctr_rx,
-            sample_rate: None,
-            global_transposition: 0,
+            ctr_tx,
+            tempo_bpm: 90.0,
+            rhythm,
             virtual_paths,
             clients,
             cache,
+            last_start: SystemTime::now(),
+            last_time: 0.0,
+            current_beat: rhythm.num_beats - 1,
+            current_div: rhythm.num_divs - 1,
         }
     }
 
     pub fn register_node_kind<F>(&mut self, name: &str, constructor: F)
     where
-        F: Fn() -> RenderPtr + 'static + Sync + Send,
+        F: Fn() -> ControlPtr + 'static + Sync + Send,
     {
         self.registered_node_kinds
             .insert(name.to_owned(), Box::new(constructor));
     }
 
-    pub fn set_sample_rate(&mut self, sample_rate: u32) {
-        self.sample_rate = Some(sample_rate);
-        for (_, node) in &mut self.nodes {
-            node.set_sample_rate(sample_rate);
-        }
-    }
-
-    pub fn set_global_transposition(&mut self, transposition: i8) {
-        self.global_transposition = transposition;
-        for (_, node) in &mut self.nodes {
-            node.set_global_transposition(transposition);
-        }
-    }
-
     pub async fn update(&mut self) {
         self.receive_requests().await;
         self.receive_midi_messages();
-        self.receive_drum_machine_messages();
         self.process_json_updates().await;
-    }
 
-    pub fn render(&mut self, lbuf: &mut [f32], rbuf: &mut [f32]) {
-        self.render_audio(lbuf, rbuf);
-    }
-
-    pub fn add_node(&mut self, kind: String, mut node: RenderPtr) {
-        if let Some(sample_rate) = self.sample_rate {
-            node.set_sample_rate(sample_rate);
+        if self.enabled {
+            let time = self.timestamp();
+            let period = self.period();
+            if time - self.last_time >= period {
+                self.advance_div();
+                self.beat_tick(self.current_beat, self.current_div).await;
+                self.last_time += period;
+            }
         }
+    }
+
+    pub fn add_node(&mut self, kind: String, mut node: ControlPtr) {
         node.set_virtual_paths(self.virtual_paths.clone());
-        node.set_global_transposition(self.global_transposition);
+        node.set_rhythm(self.rhythm);
+        node.set_tempo_bpm(self.tempo_bpm);
+        node.set_control_sender(self.ctr_tx.clone());
         self.nodes.push((kind, node));
     }
 
@@ -153,6 +166,27 @@ impl Renderer {
         while let Ok((kind, responder)) = self.req_rx.try_recv() {
             self.process_request(kind, responder).await;
         }
+    }
+
+    pub async fn deserialize(&mut self, source: &serde_json::Value) -> DeserializationResult {
+        deser_field_opt(source, "enabled", |v| self.enabled = v)?;
+        deser_field_opt(source, "tempo_bpm", |v| self.tempo_bpm = v)?;
+        deser_field_opt(source, "rhythm", |v| self.rhythm = v)?;
+        self.cache.set_controller_enabled(self.enabled).await;
+        self.cache.set_controller_tempo_bpm(self.tempo_bpm).await;
+        self.cache.set_controller_rhythm(self.rhythm).await;
+        self.broadcast_update(UpdateKind::Enabled(self.enabled));
+        self.broadcast_update(UpdateKind::TempoBpm(self.tempo_bpm));
+        self.broadcast_update(UpdateKind::Rhythm(self.rhythm));
+        Ok(())
+    }
+
+    pub async fn serialize(&self) -> serde_json::Value {
+        json!({
+            "enabled": expect_serialize(self.enabled),
+            "tempo_bpm": expect_serialize(self.tempo_bpm),
+            "rhythm": expect_serialize(self.rhythm),
+        })
     }
 
     fn receive_midi_messages(&mut self) {
@@ -163,37 +197,35 @@ impl Renderer {
         }
     }
 
-    fn receive_drum_machine_messages(&mut self) {
-        while let Ok(msg) = self.dm_ctr_rx.try_recv() {
-            let node_id = msg.instrument_id;
-            if node_id < self.nodes.len() {
-                let node = &mut self.nodes[node_id].1;
-                node.receive_midi_message(&msg.midi_msg);
-            }
-        }
-    }
-
     async fn process_json_updates(&mut self) {
         for (id, node) in self.nodes.iter_mut().enumerate() {
             if let Some(updates) = node.1.json_updates() {
-                self.cache.render_node_updates(id, &updates).await;
-                self.clients.broadcast(ServerMessageKind::RendererUpdate(
+                self.cache.control_node_updates(id, &updates).await;
+                self.clients.broadcast(ServerMessageKind::ControllerUpdate(
                     UpdateKind::NodeUpdates { id, updates },
                 ));
             }
         }
     }
 
-    fn render_audio(&mut self, lbuf: &mut [f32], rbuf: &mut [f32]) {
-        lbuf.fill(0.0);
-        rbuf.fill(0.0);
-        for (_, node) in &mut self.nodes {
-            node.render_additive(lbuf, rbuf)
-        }
-    }
-
     async fn process_request(&mut self, kind: RequestKind, responder: Responder) {
         match kind {
+            RequestKind::Reset => {
+                respond(responder, ResponseKind::Ok);
+                self.reset();
+            }
+            RequestKind::SetEnabled(enabled) => {
+                respond(responder, ResponseKind::Ok);
+                self.set_enabled(enabled).await;
+            }
+            RequestKind::SetTempoBpm(tempo_bpm) => {
+                respond(responder, ResponseKind::Ok);
+                self.set_tempo_bpm(tempo_bpm).await;
+            }
+            RequestKind::SetRhythm(rhythm) => {
+                respond(responder, ResponseKind::Ok);
+                self.set_rhythm(rhythm).await;
+            }
             RequestKind::SetUserPreset(preset) => {
                 if preset < node::NUM_USER_PRESETS {
                     self.set_user_preset(preset);
@@ -218,6 +250,37 @@ impl Renderer {
         }
     }
 
+    async fn set_enabled(&mut self, flag: bool) {
+        self.enabled = flag;
+        if flag {
+            self.reset();
+        }
+        self.cache.set_controller_enabled(flag).await;
+        self.broadcast_update(UpdateKind::Enabled(flag));
+    }
+
+    async fn set_tempo_bpm(&mut self, tempo_bpm: f32) {
+        self.tempo_bpm = tempo_bpm;
+
+        for node in &mut self.nodes {
+            node.1.set_tempo_bpm(tempo_bpm);
+        }
+
+        self.cache.set_controller_tempo_bpm(tempo_bpm).await;
+        self.broadcast_update(UpdateKind::TempoBpm(tempo_bpm));
+    }
+
+    async fn set_rhythm(&mut self, rhythm: Rhythm) {
+        self.rhythm = rhythm;
+        self.reset();
+
+        for node in &mut self.nodes {
+            node.1.set_rhythm(rhythm);
+        }
+        self.cache.set_controller_rhythm(rhythm).await;
+        self.broadcast_update(UpdateKind::Rhythm(rhythm));
+    }
+
     fn process_node_request(&mut self, responder: Responder, id: usize, kind: node::RequestKind) {
         if id >= self.nodes.len() {
             respond(responder, ResponseKind::InvalidId);
@@ -233,10 +296,10 @@ impl Renderer {
             return;
         }
 
-        let node: RenderPtr = self.registered_node_kinds[&kind]();
+        let node: ControlPtr = self.registered_node_kinds[&kind]();
         if let Ok(value) = node.serialize() {
             self.add_node(kind.clone(), node);
-            self.cache.add_render_node(&kind, &value).await;
+            self.cache.add_control_node(&kind, &value).await;
             respond(responder, ResponseKind::Ok);
             self.broadcast_update(UpdateKind::AddNode {
                 id: self.nodes.len() - 1,
@@ -253,7 +316,7 @@ impl Renderer {
             respond(responder, ResponseKind::InvalidId);
         } else {
             self.nodes.remove(id);
-            self.cache.remove_render_node(id).await;
+            self.cache.remove_control_node(id).await;
             respond(responder, ResponseKind::Ok);
             self.broadcast_update(UpdateKind::RemoveNode { id });
         }
@@ -265,7 +328,7 @@ impl Renderer {
         } else {
             let node = &self.nodes[id];
             self.add_node(node.0.clone(), node.1.clone_node());
-            self.cache.clone_render_node(id).await;
+            self.cache.clone_control_node(id).await;
             respond(responder, ResponseKind::Ok);
             self.broadcast_update(UpdateKind::CloneNode { id });
         }
@@ -277,15 +340,64 @@ impl Renderer {
         } else {
             let node = self.nodes.remove(id);
             self.nodes.insert(new_id, node);
-            self.cache.move_render_node(id, new_id).await;
+            self.cache.move_control_node(id, new_id).await;
             respond(responder, ResponseKind::Ok);
             self.broadcast_update(UpdateKind::MoveNode { id, new_id });
         }
     }
 
+    fn reset(&mut self) {
+        self.last_start = SystemTime::now();
+        self.last_time = self.timestamp() - self.period();
+        self.current_beat = self.rhythm.num_beats - 1;
+        self.current_div = self.rhythm.num_divs - 1;
+
+        for node in &mut self.nodes {
+            node.1.reset();
+        }
+
+        self.broadcast_update(UpdateKind::BeatState {
+            beat: self.current_beat,
+            div: self.current_div,
+        });
+    }
+
+    async fn beat_tick(&mut self, beat_num: u8, div_num: u8) {
+        for node in &mut self.nodes {
+            node.1.beat_tick(beat_num, div_num).await;
+        }
+        self.broadcast_update(UpdateKind::BeatState {
+            beat: beat_num,
+            div: div_num,
+        });
+    }
+
     fn broadcast_update(&mut self, kind: UpdateKind) {
         self.clients
-            .broadcast(ServerMessageKind::RendererUpdate(kind));
+            .broadcast(ServerMessageKind::ControllerUpdate(kind));
+    }
+
+    pub fn period(&self) -> f32 {
+        60.0 / (self.tempo_bpm * self.rhythm.num_divs as f32)
+    }
+
+    fn advance_div(&mut self) {
+        self.current_div = (self.current_div + 1) % self.rhythm.num_divs;
+        if self.current_div == 0 {
+            self.advance_beat();
+        }
+    }
+
+    fn advance_beat(&mut self) {
+        self.current_beat = (self.current_beat + 1) % self.rhythm.num_beats;
+    }
+
+    fn timestamp(&self) -> f32 {
+        let duration = self
+            .last_start
+            .elapsed()
+            .expect("Unexpected error while getting timestamp");
+        duration.as_secs_f32()
     }
 }
 

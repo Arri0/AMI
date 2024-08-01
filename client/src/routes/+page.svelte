@@ -1,25 +1,31 @@
 <script>
 	import { appInit, appDestroy, getApi } from '../lib/js/app.js';
 	import { onDestroy, onMount } from 'svelte';
-	import { openFileBrowser } from '../lib/js/app';
 	import Keyboard from '../lib/comp/section/comp/Keyboard.svelte';
 	import MainMenu from '../lib/comp/section/comp/MainMenu.svelte';
-	import MidiPorts from '../lib/comp/section/MidiPorts.svelte';
-	import Nodes from '../lib/comp/section/RenderNodes.svelte';
-	import DrumMachine from '../lib/comp/section/DrumMachine.svelte';
+	import RenderNodes from '../lib/comp/section/RenderNodes.svelte';
+	import Controller from '../lib/comp/section/Controller.svelte';
 	import Log from '../lib/comp/section/Log.svelte';
 	import Settings from '../lib/comp/section/Settings.svelte';
 	import FileBrowser from '../lib/comp/file_browser/FileBrowser.svelte';
 	import KeyboardEditor from '../lib/comp/keyboard_editor/KeyboardEditor.svelte';
+	import ControlNodes from '../lib/comp/section/ControlNodes.svelte';
 
 	let activeKeys;
 	let currentSection;
 	let previousSection;
-	let currentNode = null;
+	let currentRenderNode = null;
+	let currentControlNode = null;
+	let settingsSubsection = null;
 
 	function onSectionChanged() {
-		if (previousSection === currentSection && currentSection === 'render-nodes') {
-			currentNode = null;
+		if (previousSection === currentSection) {
+			if(currentSection === 'render-nodes')
+				currentRenderNode = null;
+			if(currentSection === 'control-nodes')
+				currentControlNode = null;
+			if(currentSection === 'settings')
+			    settingsSubsection = null;
 		}
 	}
 
@@ -61,12 +67,12 @@
 </script>
 
 <div class="grid-rows-1fr-auto grid h-screen w-screen bg-slate-900 overflow-hidden">
-	{#if currentSection === 'midi-ports'}
-		<MidiPorts />
-	{:else if currentSection === 'render-nodes'}
-		<Nodes bind:currentNode />
-	{:else if currentSection === 'drum-machine'}
-		<DrumMachine />
+	{#if currentSection === 'render-nodes'}
+		<RenderNodes bind:currentNode={currentRenderNode} />
+	{:else if currentSection === 'control-nodes'}
+		<ControlNodes bind:currentNode={currentControlNode} />
+	{:else if currentSection === 'controller'}
+		<Controller />
 	{:else if currentSection === 'log'}
 		<Log />
 		<Keyboard
@@ -75,7 +81,7 @@
 			on:key-pressed={(ev) => console.log('pressed', ev.detail)}
 			on:key-released={(ev) => console.log('released', ev.detail)} />
 	{:else if currentSection === 'settings'}
-		<Settings />
+		<Settings bind:subsection={settingsSubsection} />
 	{/if}
 	<MainMenu bind:currentSection bind:previousSection on:section-changed={onSectionChanged} />
 	<FileBrowser />

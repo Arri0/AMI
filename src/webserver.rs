@@ -1,8 +1,9 @@
 use crate::{
-    control::drum_machine,
-    json::JsonFieldUpdate,
+    control::controller,
+    json::{expect_serialize, JsonFieldUpdate},
     midi::{self, MidiReader},
     render::renderer,
+    rhythm::Rhythm,
 };
 use axum::{
     extract::{
@@ -256,9 +257,9 @@ pub enum ServerMessageKind {
     Cache(serde_json::Value),
     RendererResponse(renderer::ResponseKind),
     RendererUpdate(renderer::UpdateKind),
+    ControllerResponse(controller::ResponseKind),
+    ControllerUpdate(controller::UpdateKind),
     DirInfo(Option<Vec<(bool, PathBuf)>>), // (is_dir, path)
-    DrumMachineResponse(drum_machine::ResponseKind),
-    DrumMachineUpdates(Vec<JsonFieldUpdate>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -275,8 +276,12 @@ pub enum ClientMessageKind {
     ConnectMidiInput(usize, String),
     DisconnectMidiInput(usize),
     RendererRequest(renderer::RequestKind),
+    ControllerRequest(controller::RequestKind),
     ReadDir(PathBuf),
-    DrumMachineRequest(drum_machine::RequestKind),
+    MakeDir(PathBuf),
+    DeleteFile(PathBuf),
+    RenameFile(PathBuf, PathBuf),
+    CopyFile(PathBuf, PathBuf),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -293,27 +298,9 @@ pub struct Cache {
 
 // Thread safe cache
 impl Cache {
-    pub fn new(drum_machine_json: serde_json::Value) -> Self {
-        Self {
-            cache: Arc::new(Mutex::new(json!({
-                "render_nodes": [],
-                "control_nodes": [],
-                "drum_machine": drum_machine_json,
-            }))),
-        }
-    }
-
     pub async fn to_json(&self) -> serde_json::Value {
         let cache = self.cache.lock().await;
         cache.clone()
-    }
-
-    pub async fn drum_machine_updates(&mut self, updates: &[JsonFieldUpdate]) {
-        let mut cache = self.cache.lock().await;
-        let dm = &mut cache["drum_machine"];
-        for update in updates {
-            dm[&update.0] = update.1.clone();
-        }
     }
 
     pub async fn add_render_node(&mut self, kind: &str, value: &serde_json::Value) {
@@ -355,6 +342,86 @@ impl Cache {
         let node = &mut cache["render_nodes"][node_id]["instance"];
         for update in updates {
             node[&update.0] = update.1.clone();
+        }
+    }
+
+    pub async fn set_controller(&mut self, value: serde_json::Value) {
+        let mut cache = self.cache.lock().await;
+        cache["controller"] = value;
+    }
+
+    pub async fn set_controller_enabled(&mut self, flag: bool) {
+        let mut cache = self.cache.lock().await;
+        if let Some(controller) = cache["controller"].as_object_mut() {
+            controller.insert("enabled".into(), flag.into());
+        }
+    }
+
+    pub async fn set_controller_tempo_bpm(&mut self, tempo_bpm: f32) {
+        let mut cache = self.cache.lock().await;
+        if let Some(controller) = cache["controller"].as_object_mut() {
+            controller.insert("tempo_bpm".into(), tempo_bpm.into());
+        }
+    }
+
+    pub async fn set_controller_rhythm(&mut self, rhythm: Rhythm) {
+        let mut cache = self.cache.lock().await;
+        if let Some(controller) = cache["controller"].as_object_mut() {
+            controller.insert("rhythm".into(), expect_serialize(rhythm));
+        }
+    }
+
+    pub async fn add_control_node(&mut self, kind: &str, value: &serde_json::Value) {
+        let mut cache = self.cache.lock().await;
+        if let Some(nodes) = cache["control_nodes"].as_array_mut() {
+            nodes.push(json!({
+                "kind": kind,
+                "instance": value,
+            }));
+        }
+    }
+
+    pub async fn remove_control_node(&mut self, id: usize) {
+        let mut cache = self.cache.lock().await;
+        if let Some(nodes) = cache["control_nodes"].as_array_mut() {
+            nodes.remove(id);
+        }
+    }
+
+    pub async fn clone_control_node(&mut self, id: usize) {
+        let mut cache = self.cache.lock().await;
+        if let Some(nodes) = cache["control_nodes"].as_array_mut() {
+            if id <= nodes.len() {
+                nodes.push(nodes[id].clone());
+            }
+        }
+    }
+
+    pub async fn move_control_node(&mut self, id: usize, new_id: usize) {
+        let mut cache = self.cache.lock().await;
+        if let Some(nodes) = cache["render_nodes"].as_array_mut() {
+            let node = nodes.remove(id);
+            nodes.insert(new_id, node);
+        }
+    }
+
+    pub async fn control_node_updates(&mut self, node_id: usize, updates: &[JsonFieldUpdate]) {
+        let mut cache = self.cache.lock().await;
+        let node = &mut cache["control_nodes"][node_id]["instance"];
+        for update in updates {
+            node[&update.0] = update.1.clone();
+        }
+    }
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            cache: Arc::new(Mutex::new(json!({
+                "render_nodes": [],
+                "control_nodes": [],
+                "controller": {}
+            }))),
         }
     }
 }

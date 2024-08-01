@@ -128,33 +128,21 @@
 	<div class="flex flex-col gap-4">
 		<div
 			class="scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent flex flex-row gap-1 overflow-x-auto text-nowrap px-4">
-			<span class="w-auto"><Button rounded="left" on:click={maskAllOn}>All On</Button></span>
-			<span class="w-auto"><Button rounded="none" on:click={maskAllOff}>All Off</Button></span>
-			<span class="w-auto"
-				><Button rounded="right" on:click={maskInvertAll}>Invert All</Button></span>
+			<Button class="rounded-l-full" on:click={maskAllOn}>All On</Button>
+			<Button on:click={maskAllOff}>All Off</Button>
+			<Button class="rounded-r-full" on:click={maskInvertAll}>Invert All</Button>
 			<span class="mx-2 border border-l-2 border-slate-700"></span>
-			<span class="w-auto"
-				><Button
-					rounded="left"
-					active={mode == 'left-half'}
-					on:click={() => toggleMode('left-half')}>Left Half</Button
-				></span>
-			<span class="w-auto"
-				><Button
-					rounded="none"
-					active={mode == 'right-half'}
-					on:click={() => toggleMode('right-half')}>Right Half</Button
-				></span>
-			<span class="w-auto"
-				><Button rounded="none" active={mode == 'region'} on:click={() => toggleMode('region')}
-					>Region</Button
-				></span>
-			<span class="w-auto"
-				><Button
-					rounded="right"
-					active={mode == 'negative-region'}
-					on:click={() => toggleMode('negative-region')}>Negative Region</Button
-				></span>
+			<Button
+				class="rounded-l-full"
+				active={mode == 'left-half'}
+				on:click={() => toggleMode('left-half')}>Left Half</Button>
+			<Button active={mode == 'right-half'} on:click={() => toggleMode('right-half')}
+				>Right Half</Button>
+			<Button active={mode == 'region'} on:click={() => toggleMode('region')}>Region</Button>
+			<Button
+				class="rounded-r-full"
+				active={mode == 'negative-region'}
+				on:click={() => toggleMode('negative-region')}>Negative Region</Button>
 		</div>
 		{#if !keyboardHidden}
 			<Keyboard

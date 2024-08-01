@@ -10,33 +10,30 @@
 	export let currentNode;
 
 	const NODE_KINDS = [
-		['RustySynth', 'Rusty Synth'],
-		['OxiSynth', 'Oxi Synth'],
-		['FluidliteSynth', 'Fluidlite Synth'],
-		['SfizzSynth', 'Sfizz Synth'],
+		['DrumMachine', 'Drum Machine'],
 	];
 
-	$: nodes = $cache.render_nodes;
+	$: nodes = $cache.control_nodes;
 
 	async function newNode(kind) {
-		console.log(await getApi().addRenderNode(kind));
+		console.log(await getApi().addControlNode(kind));
 	}
 
 	async function removeNode(id) {
-		console.log(await getApi().removeRenderNode(id));
+		console.log(await getApi().removeControlNode(id));
 	}
 
 	async function cloneNode(id) {
-		console.log(await getApi().cloneRenderNode(id));
+		console.log(await getApi().cloneControlNode(id));
 	}
 
 	async function toggleNode(id) {
 		const prevValue = nodes[id]["instance"].enabled;
-		console.log(await getApi().renderNodeSetEnabled(id, !prevValue));
+		console.log(await getApi().controlNodeSetEnabled(id, !prevValue));
 	}
 
 	async function setUserPreset(preset) {
-		console.log(await getApi().rendererSetUserPreset(preset));
+		console.log(await getApi().controllerSetUserPreset(preset));
 	}
 
 	function openNode(id) {
@@ -46,8 +43,8 @@
 
 <Section>
 	<Header>
-		<span class="mx-2 inline-block align-middle">Render Nodes</span>
-		<Icon icon="game-icons:grand-piano" class="inline-block align-middle" />
+		<span class="mx-2 inline-block align-middle">Control Nodes</span>
+		<Icon icon="ant-design:control-filled" class="inline-block align-middle" />
 	</Header>
 
 	<Content>
@@ -69,7 +66,7 @@
 			</div>
 		</div>
 		<div class="mx-auto my-4 flex max-w-[30rem] select-none flex-col gap-2 px-2">
-			{#each nodes as {instance}, nodeId}
+			{#each nodes as {_kind,instance}, nodeId}
 				<div class="flex flex-row items-center gap-4">
 					<div class="flex grow flex-row">
 						<button on:click={() => toggleNode(nodeId)} class="w-8 rounded-l-full {instance.enabled ? 'bg-green-600' : 'bg-red-700'}"></button>

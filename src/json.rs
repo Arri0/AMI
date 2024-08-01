@@ -12,6 +12,10 @@ pub fn serialize<T: Serialize>(value: T) -> SerializationResult {
     serde_json::to_value(value).map_err(|_| Error)
 }
 
+pub fn expect_serialize<T: Serialize>(value: T) -> serde_json::Value {
+    serde_json::to_value(value).expect("Failed to serialize: {value:?}")
+}
+
 pub fn serialize_or_null<T: Serialize>(value: T) -> serde_json::Value {
     if let Ok(val) = serde_json::to_value(value) {
         val

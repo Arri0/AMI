@@ -1,12 +1,12 @@
 <script>
-	import { getApi } from '$lib/js/app.js';
+	import { getApi, openKeyboardEditor } from '$lib/js/app.js';
 	import InputText from '../../form/InputText.svelte';
-	import BoolProp from './comp/BoolProp.svelte';
-	import FileProp from './comp/FileProp.svelte';
-	import FilterChannels from './comp/FilterChannels.svelte';
-	import NumProp from './comp/NumProp.svelte';
-	import PresetProp from './comp/PresetProp.svelte';
-	import VelocityMapping from './comp/VelocityMapping.svelte';
+	import BoolProp from '../node_comp/BoolProp.svelte';
+	import FileProp from '../node_comp/FileProp.svelte';
+	import FilterChannels from '../node_comp/FilterChannels.svelte';
+	import NumProp from '../node_comp/NumProp.svelte';
+	import PresetProp from '../node_comp/PresetProp.svelte';
+	import VelocityMapping from '../node_comp/VelocityMapping.svelte';
 
 	export let id;
 	export let instance;
@@ -22,43 +22,43 @@
 	}
 
 	async function changeName(newName) {
-		await getApi().nodeSetName(id, newName);
+		await getApi().renderNodeSetName(id, newName);
 	}
 
 	async function changeEnabled(newEnabled) {
-		await getApi().nodeSetEnabled(id, newEnabled);
+		await getApi().renderNodeSetEnabled(id, newEnabled);
 	}
 
 	async function changeGlobalTransposition(newEnabled) {
-		await getApi().nodeSetIgnoreGlobalTransposition(id, !newEnabled);
+		await getApi().renderNodeSetIgnoreGlobalTransposition(id, !newEnabled);
 	}
 
 	async function changeGain(newGain) {
-		await getApi().nodeSetGain(id, newGain);
+		await getApi().renderNodeSetGain(id, newGain);
 	}
 
 	async function changeTransposition(newTransposition) {
-		await getApi().nodeSetTransposition(id, newTransposition);
+		await getApi().renderNodeSetTransposition(id, newTransposition);
 	}
 
 	async function changeVelocityMapping(newMapping) {
-		await getApi().nodeSetVelocityMapping(id, newMapping);
+		await getApi().renderNodeSetVelocityMapping(id, newMapping);
 	}
 
 	async function loadFile(newFile) {
-		await getApi().nodeLoadFile(id, newFile);
+		await getApi().renderNodeLoadFile(id, newFile);
 	}
 
 	async function changeBankAndPreset(newBank, newPreset) {
-		await getApi().nodeSetBankAndPreset(id, newBank, newPreset);
+		await getApi().renderNodeSetBankAndPreset(id, newBank, newPreset);
 	}
 
 	async function changeReverbActive(active) {
-		await getApi().nodeSetSfReverbActive(id, active);
+		await getApi().renderNodeSetSfReverbActive(id, active);
 	}
 
 	async function changeReverbParams() {
-		await getApi().nodeSetSfReverbParams(id, {
+		await getApi().renderNodeSetSfReverbParams(id, {
 			room_size: reverbRoomSize,
 			damping: reverbDamping,
 			width: reverbWidth,
@@ -67,11 +67,23 @@
 	}
 
 	async function updateMidiFilterChannel(channelId, enabled) {
-		await getApi().nodeUpdateMidiFilterChannel(id, channelId, enabled);
+		await getApi().renderNodeUpdateMidiFilterChannel(id, channelId, enabled);
 	}
 
 	async function updateMidiFilterSustain(enabled) {
-		await getApi().nodeUpdateMidiFilterControlChange(id, 64, enabled);
+		await getApi().renderNodeUpdateMidiFilterControlChange(id, 64, enabled);
+	}
+
+	async function setUserPresetEnabled(presetId, enabled) {
+		await getApi().renderNodeSetUserPresetEnabled(id, presetId, enabled);
+	}
+
+	async function openNoteMaskEditor() {
+		const mask = await openKeyboardEditor({
+			title: 'Keyboard Mask',
+			mask: instance.midi_filter.notes
+		});
+		await getApi().renderNodeUpdateMidiFilterNotes(id, mask);
 	}
 
 	function toDb(value) {
@@ -92,14 +104,14 @@
 
 <div class="contents">
 	<div class="flex flex-row items-start gap-1">
-		<!-- <p class="grow-0"><InputText value={id} readonly={true} /></p>
-        <p class="grow"><InputText bind:value={name} /></p> -->
-		<div class="w-10 text-center"><InputText value={id} readonly={true} rounded="left" /></div>
+		<div class="w-10 text-center">
+			<InputText value={id} readonly={true} class="rounded-l-full w-full" />
+		</div>
 		<div class="grow">
 			<InputText
 				on:change={(e) => changeName(e.target.value)}
 				value={instance.name}
-				rounded="right" />
+				class="rounded-r-full" />
 		</div>
 	</div>
 	<BoolProp name={'Enabled'} value={instance.enabled} on:change={(e) => changeEnabled(e.detail)} />
@@ -186,5 +198,25 @@
 		name={'Sustain Pedal'}
 		value={instance.midi_filter.control_commands[64]}
 		on:change={(e) => updateMidiFilterSustain(e.detail)} />
+	<FilterChannels
+		name="User Presets"
+		channels={instance.user_presets}
+		on:change={(e) => setUserPresetEnabled(e.detail.id, e.detail.value)} />
+
+	<div class="flex flex-row gap-4">
+		<div class="grow overflow-hidden text-ellipsis text-nowrap">Keyboard Mask</div>
+		<div>
+			<!-- <input
+				type="checkbox"
+				bind:checked={value}
+				on:change={(e) => dispatch('change', e.target.checked)}
+				class="scale-150" /> -->
+			<button
+				on:click={openNoteMaskEditor}
+				class="grid place-items-center rounded-full border border-solid border-slate-700 bg-slate-800 px-3 py-1 text-slate-300">
+				Modify
+			</button>
+		</div>
+	</div>
 	<!-- <textarea>{JSON.stringify(instance, null, 4)}</textarea> -->
 </div>

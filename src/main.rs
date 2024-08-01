@@ -1,6 +1,9 @@
 use audio::output::{BufferTx, DefaultOutputDeviceParams};
 use clap::Parser;
-use control::drum_machine::{self, DrumMachine};
+use control::{
+    controller::{self, Controller},
+    node::drum_machine,
+};
 use midi::MidiReader;
 use render::{
     node::{fluidlite_synth, oxi_synth, rusty_synth, sfizz_synth},
@@ -65,7 +68,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("| Beats directory: {:?}", args.beats);
 
     let (midi_tx, midi_rx) = midi::create_channel(2048);
-    let (req_tx, req_rx) = renderer::create_request_channel(32);
+    let (rnd_req_tx, rnd_req_rx) = renderer::create_request_channel(32);
+    let (ctr_req_tx, ctr_req_rx) = controller::create_request_channel(32);
+    let (ctr_tx, ctr_rx) = control::create_control_channel(32);
 
     let mut virtual_paths = crate::path::VirtualPaths::default();
     virtual_paths.insert("samples:".into(), args.samples);
@@ -97,26 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(run_midi_logger(midi_rx, clients.clone()));
     tokio::spawn(run_midi_port_watchdog(clients.clone()));
 
-    let (dm_ctr_tx, dm_ctr_rx) = control::create_control_channel(32);
-    let (dm_req_tx, dm_req_rx) = drum_machine::create_request_channel(32);
-    let mut drum_machine = DrumMachine::new(dm_ctr_tx, dm_req_rx, virtual_paths.clone());
-    let drum_machine_json = drum_machine
-        .serialize()
-        .expect("Failed to serialize Drum Machine");
-    let cache = webserver::Cache::new(drum_machine_json);
-
-    let mut dm_cache = cache.clone();
-    let mut dm_clients = clients.clone();
-    tokio::spawn(async move {
-        loop {
-            drum_machine.tick().await;
-            if let Some(updates) = drum_machine.json_updates() {
-                dm_cache.drum_machine_updates(&updates).await;
-                dm_clients.broadcast(ServerMessageKind::DrumMachineUpdates(updates));
-            }
-            tokio::time::sleep(Duration::from_secs_f32(drum_machine.period().min(0.01))).await;
-        }
-    });
+    let mut cache = webserver::Cache::default();
 
     #[cfg(not(target_os = "windows"))]
     let sample_rate = 44100;
@@ -133,16 +119,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .expect("Failed to connect to output device");
 
-    let renderer_vp = virtual_paths.clone();
-    let req_num_samples = audio_output.required_num_samples;
-    let lbuf_tx = audio_output.lbuf_tx;
-    let rbuf_tx = audio_output.rbuf_tx;
-
     let mut renderer = Renderer::new(
         midi_tx.subscribe(),
-        req_rx,
-        dm_ctr_rx,
-        renderer_vp,
+        rnd_req_rx,
+        ctr_rx,
+        virtual_paths.clone(),
         clients.clone(),
         cache.clone(),
     );
@@ -152,7 +133,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer.register_node_kind("SfizzSynth", || Box::<sfizz_synth::Node>::default());
     renderer.set_sample_rate(audio_output.sample_rate);
 
+    let req_num_samples = audio_output.required_num_samples;
+    let lbuf_tx = audio_output.lbuf_tx;
+    let rbuf_tx = audio_output.rbuf_tx;
     tokio::spawn(run_renderer(renderer, req_num_samples, (lbuf_tx, rbuf_tx)));
+
+    let mut controller = Controller::new(
+        midi_tx.subscribe(),
+        ctr_req_rx,
+        ctr_tx,
+        virtual_paths.clone(),
+        clients.clone(),
+        cache.clone(),
+    );
+    controller.register_node_kind("DrumMachine", || Box::<drum_machine::Node>::default());
+    cache.set_controller(controller.serialize().await).await;
+
+    tokio::spawn(run_controller(controller));
 
     let shared_state = webserver::SharedState {
         clients: Clients::clone(&clients),
@@ -163,8 +160,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     webserver::run(3000, shared_state, move |addr, req| {
         let midi_reader = Arc::clone(&midi_reader);
         let mut clients = Clients::clone(&clients);
-        let req_tx = req_tx.clone();
-        let dm_req_tx = dm_req_tx.clone();
+        let rnd_req_tx = rnd_req_tx.clone();
+        let ctr_req_tx = ctr_req_tx.clone();
         let vp = virtual_paths.clone();
         async move {
             use webserver::ClientMessageKind;
@@ -198,9 +195,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 ClientMessageKind::RendererRequest(req) => {
-                    let res = send_renderer_request(&req_tx, req).await;
+                    let res = send_renderer_request(&rnd_req_tx, req).await;
                     if let Some(res) = res {
                         ServerMessageKind::RendererResponse(res)
+                    } else {
+                        ServerMessageKind::Nak
+                    }
+                }
+                ClientMessageKind::ControllerRequest(req) => {
+                    let res = send_controller_request(&ctr_req_tx, req).await;
+                    if let Some(res) = res {
+                        ServerMessageKind::ControllerResponse(res)
                     } else {
                         ServerMessageKind::Nak
                     }
@@ -208,6 +213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ClientMessageKind::ReadDir(path) => {
                     if let Some(path) = vp.translate(&path) {
                         if let Ok(dir) = std::fs::read_dir(&path) {
+                            //TODO: use tokio instead
                             let entries = dir
                                 .into_iter()
                                 .flatten()
@@ -223,14 +229,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     ServerMessageKind::DirInfo(None)
                 }
-                ClientMessageKind::DrumMachineRequest(req) => {
-                    let res = send_drum_machine_request(&dm_req_tx, req).await;
-                    if let Some(res) = res {
-                        ServerMessageKind::DrumMachineResponse(res)
-                    } else {
-                        ServerMessageKind::Nak
+                ClientMessageKind::MakeDir(path) => {
+                    if let Some(path) = vp.translate(&path) {
+                        if tokio::fs::create_dir_all(&path).await.is_ok() {
+                            return ServerMessageKind::Ack;
+                        }
                     }
+                    ServerMessageKind::Nak
                 }
+                ClientMessageKind::DeleteFile(path) => {
+                    if let Some(path) = vp.translate(&path) {
+                        if path.is_dir() {
+                            if tokio::fs::remove_dir_all(path).await.is_ok() {
+                                return ServerMessageKind::Ack;
+                            }
+                        } else if path.is_file() && tokio::fs::remove_file(path).await.is_ok() {
+                            return ServerMessageKind::Ack;
+                        }
+                    }
+                    ServerMessageKind::Nak
+                }
+                ClientMessageKind::RenameFile(path, new_path) => {
+                    if let (Some(path), Some(new_path)) =
+                        (vp.translate(&path), vp.translate(&new_path))
+                    {
+                        if tokio::fs::rename(&path, &new_path).await.is_ok() {
+                            return ServerMessageKind::Ack;
+                        }
+                    }
+                    ServerMessageKind::Nak
+                }
+                ClientMessageKind::CopyFile(path, new_path) => ServerMessageKind::Nak,
             }
         }
     })
@@ -311,11 +340,18 @@ async fn send_renderer_request(
     }
 }
 
-async fn send_drum_machine_request(
-    req_tx: &drum_machine::Requester,
-    req: drum_machine::RequestKind,
-) -> Option<drum_machine::ResponseKind> {
-    let (res_tx, res_rx) = drum_machine::create_response_channel();
+async fn run_controller(mut controller: Controller) {
+    loop {
+        controller.update().await;
+        tokio::time::sleep(Duration::from_secs_f32(controller.period().min(0.01))).await;
+    }
+}
+
+async fn send_controller_request(
+    req_tx: &controller::Requester,
+    req: controller::RequestKind,
+) -> Option<controller::ResponseKind> {
+    let (res_tx, res_rx) = controller::create_response_channel();
 
     if let Ok(()) = req_tx.send((req, res_tx)).await {
         if let Ok(response_kind) = res_rx.await {

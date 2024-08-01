@@ -1,7 +1,7 @@
 
 <script>
     import { createEventDispatcher } from 'svelte';
-    import Select from '../../../form/Select.svelte';
+    import Select from '../../form/Select.svelte';
 
 	export let name = '';
     export let bank = 0;
@@ -55,7 +55,7 @@
 <div class="flex flex-row gap-4 align-middle">
 	<div class="grow overflow-hidden text-ellipsis text-nowrap">{name}</div>
     <div class="flex flex-row gap-1 w-64">
-        <span><Select options={bankOptions} rounded="left" bind:value={bankValue} on:change={emitChange}></Select></span>
-        <span class="grow"><Select options={presetOptions} rounded="right" bind:value={presetValue} on:change={emitChange}></Select></span>
+        <span><Select options={bankOptions} class="rounded-l-full w-full" bind:value={bankValue} on:change={emitChange}></Select></span>
+        <span class="grow"><Select options={presetOptions} class="rounded-r-full w-full" bind:value={presetValue} on:change={emitChange}></Select></span>
     </div>
 </div>

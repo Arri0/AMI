@@ -1,49 +1,53 @@
 <script>
 	import { getApi, openKeyboardEditor } from '$lib/js/app.js';
 	import InputText from '../../form/InputText.svelte';
-	import BoolProp from './comp/BoolProp.svelte';
-	import FileProp from './comp/FileProp.svelte';
-	import FilterChannels from './comp/FilterChannels.svelte';
-	import NumProp from './comp/NumProp.svelte';
-	import VelocityMapping from './comp/VelocityMapping.svelte';
+	import BoolProp from '../node_comp/BoolProp.svelte';
+	import FileProp from '../node_comp/FileProp.svelte';
+	import FilterChannels from '../node_comp/FilterChannels.svelte';
+	import NumProp from '../node_comp/NumProp.svelte';
+	import VelocityMapping from '../node_comp/VelocityMapping.svelte';
 
 	export let id;
 	export let instance;
 
 	async function changeName(newName) {
-		await getApi().nodeSetName(id, newName);
+		await getApi().renderNodeSetName(id, newName);
 	}
 
 	async function changeEnabled(newEnabled) {
-		await getApi().nodeSetEnabled(id, newEnabled);
+		await getApi().renderNodeSetEnabled(id, newEnabled);
 	}
 
 	async function changeGlobalTransposition(newEnabled) {
-		await getApi().nodeSetIgnoreGlobalTransposition(id, !newEnabled);
+		await getApi().renderNodeSetIgnoreGlobalTransposition(id, !newEnabled);
 	}
 
 	async function changeGain(newGain) {
-		await getApi().nodeSetGain(id, newGain);
+		await getApi().renderNodeSetGain(id, newGain);
 	}
 
 	async function changeTransposition(newTransposition) {
-		await getApi().nodeSetTransposition(id, newTransposition);
+		await getApi().renderNodeSetTransposition(id, newTransposition);
 	}
 
 	async function changeVelocityMapping(newMapping) {
-		await getApi().nodeSetVelocityMapping(id, newMapping);
+		await getApi().renderNodeSetVelocityMapping(id, newMapping);
 	}
 
 	async function loadFile(newFile) {
-		await getApi().nodeLoadFile(id, newFile);
+		await getApi().renderNodeLoadFile(id, newFile);
 	}
 
 	async function updateMidiFilterChannel(channelId, enabled) {
-		await getApi().nodeUpdateMidiFilterChannel(id, channelId, enabled);
+		await getApi().renderNodeUpdateMidiFilterChannel(id, channelId, enabled);
 	}
 
 	async function updateMidiFilterSustain(enabled) {
-		await getApi().nodeUpdateMidiFilterControlChange(id, 64, enabled);
+		await getApi().renderNodeUpdateMidiFilterControlChange(id, 64, enabled);
+	}
+
+	async function setUserPresetEnabled(presetId, enabled) {
+		await getApi().renderNodeSetUserPresetEnabled(id, presetId, enabled);
 	}
 
 	async function openNoteMaskEditor() {
@@ -51,7 +55,7 @@
 			title: 'Keyboard Mask',
 			mask: instance.midi_filter.notes
 		});
-		await getApi().nodeUpdateMidiFilterNotes(id, mask);
+		await getApi().renderNodeUpdateMidiFilterNotes(id, mask);
 	}
 
 	function toDb(value) {
@@ -65,14 +69,14 @@
 
 <div class="contents">
 	<div class="flex flex-row items-start gap-1">
-		<!-- <p class="grow-0"><InputText value={id} readonly={true} /></p>
-        <p class="grow"><InputText bind:value={name} /></p> -->
-		<div class="w-10 text-center"><InputText value={id} readonly={true} rounded="left" /></div>
+		<div class="w-10 text-center">
+			<InputText value={id} readonly={true} class="rounded-l-full w-full" />
+		</div>
 		<div class="grow">
 			<InputText
 				on:change={(e) => changeName(e.target.value)}
 				value={instance.name}
-				rounded="right" />
+				class="rounded-r-full" />
 		</div>
 	</div>
 	<BoolProp name={'Enabled'} value={instance.enabled} on:change={(e) => changeEnabled(e.detail)} />
@@ -117,6 +121,10 @@
 		name={'Sustain Pedal'}
 		value={instance.midi_filter.control_commands[64]}
 		on:change={(e) => updateMidiFilterSustain(e.detail)} />
+	<FilterChannels
+		name="User Presets"
+		channels={instance.user_presets}
+		on:change={(e) => setUserPresetEnabled(e.detail.id, e.detail.value)} />
 
 	<div class="flex flex-row gap-4">
 		<div class="grow overflow-hidden text-ellipsis text-nowrap">Keyboard Mask</div>

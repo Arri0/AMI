@@ -6,6 +6,7 @@ let api = null;
 export const availableMidiInputs = writable([]);
 export const connectedMidiInputs = writable([]);
 export const cache = writable({ render_nodes: [] });
+export const beatState = writable({ beat: 0, div: 0 });
 
 window.getApi = function() {
     return api;
@@ -15,27 +16,44 @@ window.getCache = function() {
     return get(cache);
 }
 
+window.getBeatState = function() {
+    return get(beatState);
+}
+
 window.addPiano = async function() {
     const id = get(cache).render_nodes.length;
-    console.log('id', id);
     const api = getApi();
-    await api.addNode('SfizzSynth');
-    await api.nodeLoadFile(id, 'samples:/Basic Piano.dsbundle/Basic Piano.sfz');
+    await api.addRenderNode('SfizzSynth');
+    await api.renderNodeSetName(id, 'Piano');
+    await api.renderNodeLoadFile(id, 'samples:/Basic Piano.dsbundle/Basic Piano.sfz');
     for(let i = 0; i < 16; ++i) {
-        await api.nodeUpdateMidiFilterChannel(id, i, i != 9);
+        await api.renderNodeUpdateMidiFilterChannel(id, i, i != 9);
     }
 }
 
 window.addDrums = async function() {
     const id = get(cache).render_nodes.length;
-    console.log('id', id);
     const api = getApi();
-    await api.addNode('OxiSynth');
-    await api.nodeLoadFile(id, 'samples:/MS_Basic.sf2');
-    await api.nodeSetBankAndPreset(id, 128, 25);
+    await api.addRenderNode('OxiSynth');
+    await api.renderNodeSetName(id, 'Drums');
+    await api.renderNodeLoadFile(id, 'samples:/Jnsgm2.sf2');
+    await api.renderNodeSetBankAndPreset(id, 128, 0);
     for(let i = 0; i < 16; ++i) {
-        await api.nodeUpdateMidiFilterChannel(id, i, i == 9);
+        await api.renderNodeUpdateMidiFilterChannel(id, i, i == 9);
     }
+}
+
+window.addDrumMachine = async function() {
+    const api = getApi();
+    await api.addControlNode('DrumMachine');
+}
+
+window.initDefaultSetup = async function() {
+    await window.addDrums();
+    await window.addPiano();
+    await window.addDrumMachine();
+    const api = getApi();
+    await api.controllerSetEnabled(true);
 }
 
 export let openFileBrowser = async () => {};
@@ -77,6 +95,10 @@ export function appInit() {
         cache.set(ev.detail);
         console.log('cache-update', ev.detail);
     });
+
+    api.addEventListener('beat-state', (ev) => {
+        beatState.set(ev.detail);
+    })
 }
 
 export function appDestroy() {

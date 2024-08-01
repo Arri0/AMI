@@ -222,18 +222,6 @@ impl Node {
         }
     }
 
-    fn set_user_preset(&mut self, preset: usize) -> ResponseKind {
-        if preset >= self.user_presets.len() {
-            ResponseKind::Failed
-        } else {
-            self.enabled = self.user_presets[preset];
-            json_try! {
-                self.json_updates.push(("enabled".into(), serialize(self.enabled)?))
-            }
-            ResponseKind::Ok
-        }
-    }
-
     fn set_user_preset_enabled(&mut self, preset: usize, flag: bool) -> ResponseKind {
         if preset >= self.user_presets.len() {
             ResponseKind::Failed
@@ -644,6 +632,15 @@ impl Render for Node {
         self.global_transposition = transposition;
     }
 
+    fn set_user_preset(&mut self, preset: usize) {
+        if preset < self.user_presets.len() {
+            self.enabled = self.user_presets[preset];
+            json_try! {
+                self.json_updates.push(("enabled".into(), serialize(self.enabled)?))
+            }
+        }
+    }
+
     fn process_request(&mut self, kind: RequestKind, cb: ResponseCallback) {
         type RK = RequestKind;
         match kind {
@@ -674,7 +671,6 @@ impl Render for Node {
                 level,
             } => cb(self.set_reverb_params(room_size, damping, width, level)),
             RK::UpdateMidiFilter(kind) => cb(self.update_midi_filter(kind)),
-            RK::SetUserPreset(preset) => cb(self.set_user_preset(preset)),
             RK::SetUserPresetEnabled(p, f) => cb(self.set_user_preset_enabled(p, f)),
             _ => cb(ResponseKind::Denied),
         };
